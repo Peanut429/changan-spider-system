@@ -9,10 +9,8 @@ import type {
   TaskListResponse,
 } from './types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(path, {
     ...init,
     headers: {
       'content-type': 'application/json',

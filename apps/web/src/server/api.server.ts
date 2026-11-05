@@ -1,45 +1,37 @@
-import http from "node:http";
-import { loadEnvFile, requiredEnv } from "../config/env.ts";
-import { openDatabase } from "../db/factory.ts";
-import { prefixedId } from "../core/id.ts";
-import { endOfDayInTimeZone, scrapeWindowStartTsMs } from "../core/db-time.ts";
+import { openDatabase } from "@changan/db";
+import { prefixedId, endOfDayInTimeZone, scrapeWindowStartTsMs } from "@changan/shared";
 
-const PORT = Number(process.env.API_PORT || 8787);
 const TIME_ZONE = process.env.SCRAPE_TIMEZONE || "Asia/Shanghai";
 
 type Json = Record<string, any>;
 
-function send(res: http.ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json; charset=utf-8");
-  res.setHeader("cache-control", "no-store");
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
-  res.end(text);
-}
+let dbHandle: ReturnType<typeof openDatabase> | null = null;
 
-function setCors(res: http.ServerResponse): void {
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
-}
-
-function fail(res: http.ServerResponse, status: number, message: string): void {
-  send(res, status, { error: message });
-}
-
-async function readJson(req: http.IncomingMessage): Promise<Json> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 1024 * 1024) throw new Error("请求体超过 1MB");
-    chunks.push(Buffer.from(chunk));
+function getDb() {
+  if (!dbHandle) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("缺少 DATABASE_URL");
+    dbHandle = openDatabase(url, Number(process.env.DB_POOL_MAX || 10));
   }
-  if (!chunks.length) return {};
-  const text = Buffer.concat(chunks).toString("utf8");
+  return dbHandle;
+}
+
+function json(status: number, body: unknown): Response {
+  return Response.json(body, {
+    status,
+    headers: { "cache-control": "no-store" },
+  });
+}
+
+function fail(status: number, message: string): Response {
+  return json(status, { error: message });
+}
+
+async function readJson(request: Request): Promise<Json> {
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > 1024 * 1024) throw new Error("请求体超过 1MB");
+  const text = await request.text();
+  if (!text) return {};
   try {
     const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("必须是 JSON 对象");
@@ -203,13 +195,13 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   const executed = executedResult.rows.map(taskRow);
   const summary = {
     pending: pending.length,
-    running: executed.filter((task) => task.status === "running").length,
-    success: executed.filter((task) => task.status === "success").length,
-    failed: executed.filter((task) => task.status === "failed").length,
-    cancelled: executed.filter((task) => task.status === "cancelled").length,
-    accountsSuccess: executed.reduce((sum, task) => sum + task.successAccounts, 0),
-    accountsFailed: executed.reduce((sum, task) => sum + task.failedAccounts, 0),
-    contentsSuccess: executed.reduce((sum, task) => sum + task.contentMetricCount, 0),
+    running: executed.filter((task: any) => task.status === "running").length,
+    success: executed.filter((task: any) => task.status === "success").length,
+    failed: executed.filter((task: any) => task.status === "failed").length,
+    cancelled: executed.filter((task: any) => task.status === "cancelled").length,
+    accountsSuccess: executed.reduce((sum: number, task: any) => sum + task.successAccounts, 0),
+    accountsFailed: executed.reduce((sum: number, task: any) => sum + task.failedAccounts, 0),
+    contentsSuccess: executed.reduce((sum: number, task: any) => sum + task.contentMetricCount, 0),
   };
   return { date, summary, pending, executed };
 }
@@ -284,7 +276,7 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
       errorCode: run.error_code,
       errorMessage: run.error_message,
     } : null,
-    accounts: accountsResult.rows.map((row) => ({
+    accounts: accountsResult.rows.map((row: any) => ({
       id: row.id,
       accountId: row.account_id,
       handle: row.handle,
@@ -305,7 +297,7 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
       errorCode: row.error_code,
       errorMessage: row.error_message,
     })),
-    contents: contentsResult.rows.map((row) => ({
+    contents: contentsResult.rows.map((row: any) => ({
       id: row.id,
       externalContentId: row.external_content_id,
       url: row.url,
@@ -370,7 +362,7 @@ async function listAccounts(pool: any, url: URL): Promise<Json> {
     dataValues,
   );
   return {
-    accounts: result.rows.map((row) => ({
+    accounts: result.rows.map((row: any) => ({
       id: row.id,
       platformId: row.platform_id,
       platformCode: row.platform_code,
@@ -406,7 +398,7 @@ async function listAccountTypes(pool: any): Promise<string[]> {
      ) types
      order by case when account_type = '总部' then 0 else 1 end, account_type`,
   );
-  return result.rows.map((row) => row.account_type);
+  return result.rows.map((row: any) => row.account_type);
 }
 
 async function importAccounts(pool: any, body: Json): Promise<Json> {
@@ -540,121 +532,97 @@ async function saveAccount(
   }
 }
 
-async function main(): Promise<void> {
-  loadEnvFile();
-  const handle = openDatabase(requiredEnv("DATABASE_URL"), Number(process.env.DB_POOL_MAX || 10));
-  const server = http.createServer(async (req, res) => {
-    try {
-      setCors(res);
-      if (req.method === "OPTIONS") {
-        res.statusCode = 204;
-        res.end();
-        return;
-      }
-      const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-      const path = url.pathname;
-      if (req.method === "GET" && path === "/api/health") {
-        return send(res, 200, { ok: true });
-      }
-      if (req.method === "GET" && path === "/api/tasks") {
-        const date = text(url.searchParams.get("date"));
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail(res, 400, "date 必须是 YYYY-MM-DD");
-        return send(res, 200, await listTasks(handle.pool, date));
-      }
-      const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
-      if (req.method === "GET" && taskMatch) {
-        const detail = await taskDetail(handle.pool, decodeURIComponent(taskMatch[1]));
-        return detail ? send(res, 200, detail) : fail(res, 404, "任务不存在");
-      }
-      const taskRetryMatch = path.match(/^\/api\/tasks\/([^/]+)\/retry$/);
-      if (req.method === "POST" && taskRetryMatch) {
-        const id = decodeURIComponent(taskRetryMatch[1]);
-        const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
-        if (!current.rows.length) return fail(res, 404, "任务不存在");
-        if (current.rows[0].status !== "failed") return fail(res, 409, "只有失败任务可以继续执行");
-        await handle.pool.query(
-          `update scrape_tasks
-              set status = 'pending',
-                  scheduled_at_ms = $2,
-                  lease_owner = null,
-                  lease_until_ms = null,
-                  last_error = null,
-                  updated_ts_ms = $2
-            where id = $1`,
-          [id, Date.now()],
-        );
-        const task = await handle.pool.query(`${taskSelect} where t.id = $1`, [id]);
-        return send(res, 200, { task: taskRow(task.rows[0]) });
-      }
-      if (req.method === "DELETE" && taskMatch) {
-        const id = decodeURIComponent(taskMatch[1]);
-        const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
-        if (!current.rows.length) return fail(res, 404, "任务不存在");
-        if (current.rows[0].status !== "pending") return fail(res, 409, "只有待执行任务可以删除");
-        await handle.pool.query("delete from scrape_tasks where id = $1 and status = 'pending'", [id]);
-        return send(res, 200, { ok: true, id });
-      }
-      if (req.method === "GET" && path === "/api/accounts") {
-        return send(res, 200, await listAccounts(handle.pool, url));
-      }
-      if (req.method === "GET" && path === "/api/platforms") {
-        return send(res, 200, { platforms: await listPlatforms(handle.pool) });
-      }
-      if (req.method === "GET" && path === "/api/account-types") {
-        return send(res, 200, { accountTypes: await listAccountTypes(handle.pool) });
-      }
-      if (req.method === "POST" && path === "/api/tasks") {
-        const body = await readJson(req);
-        return send(res, 201, { task: await createTask(handle.pool, body) });
-      }
-      if (req.method === "POST" && path === "/api/accounts") {
-        const body = await readJson(req);
-        return send(res, 201, { account: await saveAccount(handle.pool, body) });
-      }
-      if (req.method === "POST" && path === "/api/accounts/import") {
-        const body = await readJson(req);
-        return send(res, 200, await importAccounts(handle.pool, body));
-      }
-      const accountMatch = path.match(/^\/api\/accounts\/([^/]+)$/);
-      if (req.method === "PUT" && accountMatch) {
-        const body = await readJson(req);
-        return send(res, 200, { account: await saveAccount(handle.pool, body, decodeURIComponent(accountMatch[1])) });
-      }
-      const activeMatch = path.match(/^\/api\/accounts\/([^/]+)\/active$/);
-      if (req.method === "PATCH" && activeMatch) {
-        const body = await readJson(req);
-        const id = decodeURIComponent(activeMatch[1]);
-        const active = bool(body.active, true);
-        const result = await handle.pool.query(
-          "update social_accounts set active = $2, updated_ts_ms = $3 where id = $1 returning id",
-          [id, active, Date.now()],
-        );
-        if (!result.rows.length) return fail(res, 404, "账号不存在");
-        return send(res, 200, { ok: true, id, active });
-      }
-      return fail(res, 404, "接口不存在");
-    } catch (error: any) {
-      const message = error?.message || String(error);
-      if (error?.code === "23505") return fail(res, 409, "同一平台下 handle 已存在");
-      console.error(`[api] ${req.method} ${req.url} ${message}`);
-      return fail(res, 400, message);
+export async function handleApiRequest(request: Request): Promise<Response> {
+  try {
+    const handle = getDb();
+    const url = new URL(request.url);
+    const method = request.method;
+    const path = url.pathname;
+    if (method === "OPTIONS") return new Response(null, { status: 204 });
+    if (method === "GET" && path === "/api/health") {
+      return json(200, { ok: true });
     }
-  });
-
-  server.listen(PORT, "127.0.0.1", () => {
-    console.log(`API 已启动：http://127.0.0.1:${PORT}`);
-  });
-
-  const shutdown = async () => {
-    server.close();
-    await handle.close();
-    process.exit(0);
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+    if (method === "GET" && path === "/api/tasks") {
+      const date = text(url.searchParams.get("date"));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail(400, "date 必须是 YYYY-MM-DD");
+      return json(200, await listTasks(handle.pool, date));
+    }
+    const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
+    if (method === "GET" && taskMatch) {
+      const detail = await taskDetail(handle.pool, decodeURIComponent(taskMatch[1]));
+      return detail ? json(200, detail) : fail(404, "任务不存在");
+    }
+    const taskRetryMatch = path.match(/^\/api\/tasks\/([^/]+)\/retry$/);
+    if (method === "POST" && taskRetryMatch) {
+      const id = decodeURIComponent(taskRetryMatch[1]);
+      const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
+      if (!current.rows.length) return fail(404, "任务不存在");
+      if (current.rows[0].status !== "failed") return fail(409, "只有失败任务可以继续执行");
+      await handle.pool.query(
+        `update scrape_tasks
+            set status = 'pending',
+                scheduled_at_ms = $2,
+                lease_owner = null,
+                lease_until_ms = null,
+                last_error = null,
+                updated_ts_ms = $2
+          where id = $1`,
+        [id, Date.now()],
+      );
+      const task = await handle.pool.query(`${taskSelect} where t.id = $1`, [id]);
+      return json(200, { task: taskRow(task.rows[0]) });
+    }
+    if (method === "DELETE" && taskMatch) {
+      const id = decodeURIComponent(taskMatch[1]);
+      const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
+      if (!current.rows.length) return fail(404, "任务不存在");
+      if (current.rows[0].status !== "pending") return fail(409, "只有待执行任务可以删除");
+      await handle.pool.query("delete from scrape_tasks where id = $1 and status = 'pending'", [id]);
+      return json(200, { ok: true, id });
+    }
+    if (method === "GET" && path === "/api/accounts") {
+      return json(200, await listAccounts(handle.pool, url));
+    }
+    if (method === "GET" && path === "/api/platforms") {
+      return json(200, { platforms: await listPlatforms(handle.pool) });
+    }
+    if (method === "GET" && path === "/api/account-types") {
+      return json(200, { accountTypes: await listAccountTypes(handle.pool) });
+    }
+    if (method === "POST" && path === "/api/tasks") {
+      const body = await readJson(request);
+      return json(201, { task: await createTask(handle.pool, body) });
+    }
+    if (method === "POST" && path === "/api/accounts") {
+      const body = await readJson(request);
+      return json(201, { account: await saveAccount(handle.pool, body) });
+    }
+    if (method === "POST" && path === "/api/accounts/import") {
+      const body = await readJson(request);
+      return json(200, await importAccounts(handle.pool, body));
+    }
+    const accountMatch = path.match(/^\/api\/accounts\/([^/]+)$/);
+    if (method === "PUT" && accountMatch) {
+      const body = await readJson(request);
+      return json(200, { account: await saveAccount(handle.pool, body, decodeURIComponent(accountMatch[1])) });
+    }
+    const activeMatch = path.match(/^\/api\/accounts\/([^/]+)\/active$/);
+    if (method === "PATCH" && activeMatch) {
+      const body = await readJson(request);
+      const id = decodeURIComponent(activeMatch[1]);
+      const active = bool(body.active, true);
+      const result = await handle.pool.query(
+        "update social_accounts set active = $2, updated_ts_ms = $3 where id = $1 returning id",
+        [id, active, Date.now()],
+      );
+      if (!result.rows.length) return fail(404, "账号不存在");
+      return json(200, { ok: true, id, active });
+    }
+    return fail(404, "接口不存在");
+  } catch (error: any) {
+    const message = error?.message || String(error);
+    if (error?.code === "23505") return fail(409, "同一平台下 handle 已存在");
+    console.error(`[api] ${request.method} ${request.url} ${message}`);
+    return fail(400, message);
+  }
 }
-
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exitCode = 1;
-});

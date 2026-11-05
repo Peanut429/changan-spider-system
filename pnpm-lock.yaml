@@ -38,6 +38,9 @@ importers:
       '@changan/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@changan/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -146,7 +149,11 @@ importers:
         specifier: 8.20.0
         version: 8.20.0
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      '@types/node':
+        specifier: 25.9.3
+        version: 25.9.3
 
 packages:
 

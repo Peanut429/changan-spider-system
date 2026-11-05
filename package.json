@@ -9,7 +9,6 @@
   },
   "scripts": {
     "dev:web": "pnpm --filter @changan/web dev",
-    "dev:api": "pnpm --filter @changan/crawler api:dev",
     "worker": "pnpm --filter @changan/crawler worker",
     "typecheck": "pnpm -r typecheck",
     "build:web": "pnpm --filter @changan/web build",

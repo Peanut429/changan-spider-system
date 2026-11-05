@@ -18,7 +18,6 @@
     "auth:seed": "node --experimental-strip-types scripts/seed-browser-auth.ts",
     "db:test:seed": "node --experimental-strip-types scripts/seed-test-db.ts",
     "auth:x-login": "node --experimental-strip-types scripts/x-login.ts",
-    "api:dev": "node --experimental-strip-types src/api/server.ts",
     "worker": "node --experimental-strip-types src/main/worker.ts"
   },
   "dependencies": {
