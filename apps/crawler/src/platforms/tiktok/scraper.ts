@@ -19,6 +19,7 @@ type TikTokArgs = {
   requireLogin: boolean;
   humanVerificationReloads: number;
   humanVerificationReloadDelayMs: number;
+  stableRoundsToStop: number;
 };
 
 function accountKey(value: unknown): string {
@@ -790,6 +791,7 @@ export function createTikTokScraper(): PlatformScraper {
         requireLogin: false,
         humanVerificationReloads: 5,
         humanVerificationReloadDelayMs: 2500,
+        stableRoundsToStop: 8,
       };
 
       const maxAttempts = Math.max(1, tikTokChallengeOptions(args).reloads + 1);
