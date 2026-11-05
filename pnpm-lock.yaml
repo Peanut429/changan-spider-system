@@ -10,6 +10,9 @@ importers:
 
   apps/crawler:
     dependencies:
+      '@changan/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
@@ -32,6 +35,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@changan/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -127,7 +133,18 @@ importers:
         specifier: ^8.0.0
         version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)
 
-  packages/db: {}
+  packages/db:
+    dependencies:
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.20.0
+        version: 8.20.0
 
   packages/shared: {}
 
