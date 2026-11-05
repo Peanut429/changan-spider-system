@@ -393,7 +393,9 @@ export function activityIdsFromRsc(text: string): string[] {
     }
     if (urns.length >= 1) return urns;
   }
-  return [];
+  // 整页 RSC 也会带 root chunk，但 feed item 不在老格式的 root 数组里；
+  // 此时按 URN 出现顺序回退，否则整页首屏会被误判成 0 条。
+  return activityIdsInOrder(text);
 }
 
 /**

@@ -322,6 +322,12 @@ async function scrapeAccountViaHttp(page, source, organizationId, template, conn
 
   const tokenMatch = initialText.match(/"token":"([^"]+)"/);
   if (!tokenMatch) {
+    // 某些公司页的分页 POST 会直接返回整页 RSC，而不是 feed + token；
+    // 这种响应里仍然包含首屏帖子，可以按首屏解析，不能再因为缺少 token 失败。
+    if (initialPosts.length > 0) {
+      console.log(`账号 ${source.account} 没有分页 token，按整页首屏解析 ${initialPosts.length} 条。`);
+      return initialPosts;
+    }
     // 公司没有任何动态时，接口返回 200 + 空内容：没有 activityId、没有 token，
     // 但响应里会带“还没有动态”这类空状态文案。两者同时成立才是确定的 0 条，不是失败。
     const emptyFeed = /还没有动态|暂无企业快讯|No posts yet|No updates yet|No company updates/i.test(initialText);
