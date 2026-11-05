@@ -5,7 +5,6 @@ import { nowTsMs } from "../../core/db-time.ts";
 import { prefixedId } from "../../core/id.ts";
 import { numberOrNull, textOrNull } from "../../core/coerce.ts";
 import { ensurePlatform } from "../repositories/runs.ts";
-import { ensureAccount } from "../repositories/accounts.ts";
 import { finishRunAccount, refreshScrapeRunCounts, startRunAccount } from "../repositories/run-accounts.ts";
 import { upsertContent } from "../repositories/contents.ts";
 import { insertRawRecord } from "../repositories/raw-records.ts";
@@ -16,6 +15,7 @@ export type PersistAccountResultInput = {
   platformCode: string;
   platformName: string;
   runId: string;
+  accountId: string;
   accountRow: any;
   contentRows?: any[];
   capturedTsMs?: number;
@@ -28,7 +28,7 @@ export type PersistAccountResultInput = {
 
 /**
  * 账号级增量入库。行为从旧项目 persistScrapeAccountResult 原样迁移：
- * - 账号维表 upsert
+ * - 使用 runner 已解析的 accountId，不再从抓取结果创建账号
  * - raw account 记录
  * - account_daily_metrics upsert（account_id + run_id）
  * - 每条内容 upsert social_contents + raw content + content_daily_metrics
@@ -41,6 +41,7 @@ export async function persistScrapeAccountResult(
     platformCode,
     platformName,
     runId,
+    accountId,
     accountRow,
     contentRows = [],
     capturedTsMs = nowTsMs(),
@@ -49,7 +50,6 @@ export async function persistScrapeAccountResult(
   }: PersistAccountResultInput,
 ): Promise<void> {
   const platformId = await ensurePlatform(db, { code: platformCode, name: platformName });
-  const accountId = await ensureAccount(db, platformId, accountRow);
   await startRunAccount(db, { runId, accountId });
 
   const metricDayKey = await resolveMetricDayKey(db, runId, taskDateKey);

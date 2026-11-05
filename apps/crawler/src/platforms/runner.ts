@@ -54,7 +54,7 @@ export async function runPlatform({
         continue;
       }
 
-      await startScrapeRunAccount(ctx.db, {
+      const { accountId } = await startScrapeRunAccount(ctx.db, {
         platformCode: scraper.code,
         platformName: scraper.name,
         runId: ctx.runId,
@@ -68,6 +68,7 @@ export async function runPlatform({
           platformCode: scraper.code,
           platformName: scraper.name,
           runId: ctx.runId,
+          accountId,
           accountRow: result.accountRow,
           contentRows: result.contentRows,
           taskDateKey: ctx.taskDateKey,
@@ -80,6 +81,7 @@ export async function runPlatform({
           platformCode: scraper.code,
           platformName: scraper.name,
           runId: ctx.runId,
+          accountId,
           accountRow: {
             account: account.account,
             profileUrl: account.link,
