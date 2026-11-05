@@ -37,6 +37,27 @@ function isFatalAccountError(error) {
   return /未登录|登录 LinkedIn|无法连接到 Chrome/i.test(message);
 }
 
+const INVALID_COMPANY_LINK_MESSAGE = "链接不对，逆风车下";
+
+function isUnavailableLinkedInUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "");
+    return path === "/company/unavailable" || path === "/in/unavailable" || path === "/404";
+  } catch {
+    return false;
+  }
+}
+
+function assertCompanyPageAvailable(page): void {
+  if (isUnavailableLinkedInUrl(page.url())) {
+    throw new Error(INVALID_COMPANY_LINK_MESSAGE);
+  }
+}
+
+function isInvalidCompanyLinkError(error): boolean {
+  return String(error?.message || error || "") === INVALID_COMPANY_LINK_MESSAGE;
+}
+
 // ── 内容行构建（对齐 persistScrapeAccountResult 的字段） ──
 
 function toContentRows(posts, source, args) {
@@ -206,6 +227,7 @@ async function captureTemplateOnce(page, source) {
   try {
     await page.goto(source.link, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => null);
     await page.waitForTimeout(3000);
+    assertCompanyPageAvailable(page);
     await ensureSortRecent(page, 15000, () => {
       requests.length = 0;
     });
@@ -240,7 +262,7 @@ async function captureTemplate(page, source) {
       return await captureTemplateOnce(page, source);
     } catch (error) {
       lastError = error;
-      if (isFatalAccountError(error)) throw error;
+      if (isInvalidCompanyLinkError(error) || isFatalAccountError(error)) throw error;
       console.error(`模板抓取失败（第 ${attempt}/${TEMPLATE_CAPTURE_ATTEMPTS} 次）：${error.message}`);
       if (attempt < TEMPLATE_CAPTURE_ATTEMPTS) await sleep(RETRY_DELAY_MS);
     }
@@ -255,6 +277,7 @@ async function discoverOrganizationIdOnce(page, source) {
   const detach = capturePaginationRequests(page, requests);
   try {
     await page.goto(source.link, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => null);
+    assertCompanyPageAvailable(page);
     // 等顶卡渲染出来（有 componentkey）；这是页面结构信号，不用固定 sleep 猜。
     await page.waitForFunction(() => {
       return [...document.querySelectorAll("[componentkey]")]
@@ -292,7 +315,7 @@ async function discoverOrganizationId(page, source) {
       return await discoverOrganizationIdOnce(page, source);
     } catch (error) {
       lastError = error;
-      if (isFatalAccountError(error)) throw error;
+      if (isInvalidCompanyLinkError(error) || isFatalAccountError(error)) throw error;
       console.error(`账号 ${source.account} 解析 organizationId 失败（第 ${attempt}/${ORGANIZATION_DISCOVERY_ATTEMPTS} 次）：${error.message}`);
       if (attempt < ORGANIZATION_DISCOVERY_ATTEMPTS) await sleep(RETRY_DELAY_MS);
     }
@@ -415,7 +438,7 @@ async function scrapeAccountWithRetry(page, source, organizationId, template, co
       return { accountRow, posts };
     } catch (error) {
       lastError = error;
-      if (isFatalAccountError(error)) throw error;
+      if (isInvalidCompanyLinkError(error) || isFatalAccountError(error)) throw error;
       console.error(`账号 ${source.account} 抓取失败（第 ${attempt}/${ACCOUNT_SCRAPE_ATTEMPTS} 次）：${error.message}`);
       if (attempt < ACCOUNT_SCRAPE_ATTEMPTS) await sleep(RETRY_DELAY_MS);
     }
@@ -500,6 +523,10 @@ export function createLinkedInScraper(): PlatformScraper {
       if (!template) throw new Error("LinkedIn 模板未初始化");
       const source = { ...ctx.account, link: normalizeCompanyPostsUrl(ctx.account.link) };
       if (!/\/company\//i.test(source.link)) {
+        // 个人主页不是公司 RSC 抓取的目标；但如果它本身是无效链接，
+        // 也要按统一的链接错误提示，而不是报成“不支持的页面类型”。
+        await ctx.page.goto(source.link, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => null);
+        assertCompanyPageAvailable(ctx.page);
         throw new Error(`非公司主页（/company/），RSC 公司动态抓取不支持：${source.link}`);
       }
 
