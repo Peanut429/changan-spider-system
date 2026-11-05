@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store
+.env
+.env.local
+.env.*.local
+dist
+.output
+.nitro
+.tanstack
+coverage
+*.log
+.DS_Store
+
+.pnpm-home
+.pnpm-cache

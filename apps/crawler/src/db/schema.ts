@@ -1,0 +1,186 @@
+import { bigint, boolean, index, integer, jsonb, pgTable, text, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+
+export const platforms = pgTable("platforms", {
+  id: text("id").primaryKey(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  enabled: boolean("enabled").notNull(),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  uniqueIndex("platforms_code_key").on(table.code),
+]);
+
+export const socialAccounts = pgTable("social_accounts", {
+  id: text("id").primaryKey(),
+  platformId: text("platform_id").notNull(),
+  handle: text("handle").notNull(),
+  displayName: text("display_name"),
+  profileUrl: text("profile_url").notNull(),
+  externalAccountId: text("external_account_id"),
+  active: boolean("active").notNull(),
+  metadataJson: jsonb("metadata_json").notNull(),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+  updatedTsMs: bigint("updated_ts_ms", { mode: "number" }).notNull(),
+  accountType: varchar("account_type", { length: 100 }),
+}, (table) => [
+  uniqueIndex("uq_social_accounts_platform_handle").on(table.platformId, table.handle),
+]);
+
+export const socialContents = pgTable("social_contents", {
+  id: text("id").primaryKey(),
+  platformId: text("platform_id").notNull(),
+  accountId: text("account_id").notNull(),
+  externalContentId: text("external_content_id"),
+  url: text("url").notNull(),
+  contentType: text("content_type"),
+  publishTsMs: bigint("publish_ts_ms", { mode: "number" }),
+  firstSeenTsMs: bigint("first_seen_ts_ms", { mode: "number" }).notNull(),
+  lastSeenTsMs: bigint("last_seen_ts_ms", { mode: "number" }).notNull(),
+  title: text("title"),
+  contentSummary: text("content_summary"),
+  excerptFetchStatus: text("excerpt_fetch_status"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+  updatedTsMs: bigint("updated_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  uniqueIndex("uq_social_contents_platform_account_external_id").on(table.platformId, table.accountId, table.externalContentId),
+]);
+
+export const accountDailyMetrics = pgTable("account_daily_metrics", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  platformId: text("platform_id").notNull(),
+  runId: text("run_id").notNull(),
+  metricDayKey: integer("metric_day_key").notNull(),
+  capturedTsMs: bigint("captured_ts_ms", { mode: "number" }).notNull(),
+  followersCount: bigint("followers_count", { mode: "number" }),
+  followingCount: bigint("following_count", { mode: "number" }),
+  postsCount: bigint("posts_count", { mode: "number" }),
+  contentCountInWindow: bigint("content_count_in_window", { mode: "number" }),
+  newContentCount: bigint("new_content_count", { mode: "number" }),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  rawMetricJson: jsonb("raw_metric_json").notNull(),
+  rawRecordId: text("raw_record_id"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  uniqueIndex("uq_account_daily_metrics_account_run").on(table.accountId, table.runId),
+]);
+
+export const contentDailyMetrics = pgTable("content_daily_metrics", {
+  id: text("id").primaryKey(),
+  contentId: text("content_id").notNull(),
+  accountId: text("account_id").notNull(),
+  platformId: text("platform_id").notNull(),
+  runId: text("run_id").notNull(),
+  metricDayKey: integer("metric_day_key").notNull(),
+  capturedTsMs: bigint("captured_ts_ms", { mode: "number" }).notNull(),
+  exposureCount: bigint("exposure_count", { mode: "number" }),
+  readCount: bigint("read_count", { mode: "number" }),
+  playCount: bigint("play_count", { mode: "number" }),
+  likeCount: bigint("like_count", { mode: "number" }),
+  commentCount: bigint("comment_count", { mode: "number" }),
+  collectCount: bigint("collect_count", { mode: "number" }),
+  shareCount: bigint("share_count", { mode: "number" }),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  rawMetricJson: jsonb("raw_metric_json").notNull(),
+  rawRecordId: text("raw_record_id"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  uniqueIndex("uq_content_daily_metrics_content_run").on(table.contentId, table.runId),
+]);
+
+export const scrapeRawRecords = pgTable("scrape_raw_records", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  accountId: text("account_id"),
+  contentId: text("content_id"),
+  platformId: text("platform_id").notNull(),
+  recordType: text("record_type").notNull(),
+  source: text("source"),
+  externalId: text("external_id"),
+  url: text("url"),
+  rawJson: jsonb("raw_json").notNull(),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  capturedTsMs: bigint("captured_ts_ms", { mode: "number" }).notNull(),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+});
+
+export const scrapeRuns = pgTable("scrape_runs", {
+  id: text("id").primaryKey(),
+  platformId: text("platform_id").notNull(),
+  parentRunId: text("parent_run_id"),
+  triggerType: text("trigger_type").notNull(),
+  status: text("status").notNull(),
+  windowSinceTsMs: bigint("window_since_ts_ms", { mode: "number" }).notNull(),
+  windowUntilTsMs: bigint("window_until_ts_ms", { mode: "number" }).notNull(),
+  taskDateKey: integer("task_date_key").notNull(),
+  startedTsMs: bigint("started_ts_ms", { mode: "number" }).notNull(),
+  finishedTsMs: bigint("finished_ts_ms", { mode: "number" }),
+  rawRecordCount: integer("raw_record_count").notNull(),
+  accountMetricCount: integer("account_metric_count").notNull(),
+  contentMetricCount: integer("content_metric_count").notNull(),
+  eventLogCount: integer("event_log_count").notNull(),
+  totalAccounts: integer("total_accounts").notNull(),
+  successAccounts: integer("success_accounts").notNull(),
+  failedAccounts: integer("failed_accounts").notNull(),
+  totalContents: integer("total_contents").notNull(),
+  successContents: integer("success_contents").notNull(),
+  failedContents: integer("failed_contents").notNull(),
+  command: text("command"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+});
+
+export const scrapeRunAccounts = pgTable("scrape_run_accounts", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  accountId: text("account_id").notNull(),
+  status: text("status").notNull(),
+  startedTsMs: bigint("started_ts_ms", { mode: "number" }),
+  finishedTsMs: bigint("finished_ts_ms", { mode: "number" }),
+  contentFoundCount: integer("content_found_count").notNull(),
+  contentSavedCount: integer("content_saved_count").notNull(),
+  failedContentCount: integer("failed_content_count").notNull(),
+  lastStep: text("last_step"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  uniqueIndex("uq_scrape_run_accounts_run_account").on(table.runId, table.accountId),
+]);
+
+export const comments = pgTable("comment", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().default(""),
+  userId: text("user_id").notNull().default(""),
+  textContent: text("text_content").notNull().default(""),
+  platform: varchar("platform", { length: 100 }),
+  contentId: text("content_id"),
+  createTimestamp: bigint("create_timestamp", { mode: "number" }).default(0),
+}, (table) => [
+  index("idx_comment_user_id").on(table.userId),
+  index("idx_comment_platform").on(table.platform),
+  index("idx_comment_content_id").on(table.contentId),
+  index("idx_comment_create_timestamp").on(table.createTimestamp),
+]);
+
+export const scrapeEventLogs = pgTable("scrape_event_logs", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  accountRunId: text("account_run_id"),
+  attemptId: text("attempt_id"),
+  level: text("level").notNull(),
+  step: text("step").notNull(),
+  message: text("message").notNull(),
+  pageUrl: text("page_url"),
+  contentUrl: text("content_url"),
+  selector: text("selector"),
+  durationMs: integer("duration_ms"),
+  errorCode: text("error_code"),
+  errorStack: text("error_stack"),
+  contextJson: jsonb("context_json").notNull(),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+});
