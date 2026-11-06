@@ -646,6 +646,103 @@
   background: rgba(94, 242, 176, 0.05);
 }
 
+/* ---------- top navigation ---------- */
+
+.cx-nav {
+  padding: 2px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--sidebar-foreground) 4%, transparent);
+}
+
+.cx-nav button[role='radio'][aria-checked='true'] {
+  text-shadow: 0 0 14px color-mix(in oklab, var(--sidebar-foreground) 22%, transparent);
+}
+
+/* ---------- theme switch ---------- */
+
+.cx-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.cx-toggle-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 58px;
+  height: 28px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--sidebar-border);
+  background: var(--sidebar-foreground);
+  background: color-mix(in oklab, var(--sidebar-foreground) 8%, transparent);
+  transition: background-color 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+}
+
+.cx-toggle:hover .cx-toggle-track {
+  border-color: var(--sidebar-ring);
+}
+
+.cx-toggle:focus-visible .cx-toggle-track {
+  outline: 2px solid var(--sidebar-primary);
+  outline-offset: 2px;
+}
+
+.cx-toggle-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--sidebar-primary);
+  color: var(--sidebar-primary-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  /* slight overshoot so the thumb lands with weight */
+  transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color 220ms ease-out, color 220ms ease-out;
+}
+
+.cx-toggle[data-dark='false'] .cx-toggle-thumb {
+  transform: translateX(30px);
+}
+
+.cx-toggle-glyph {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  transition: opacity 240ms ease-out, transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.cx-toggle-glyph--in {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.cx-toggle-glyph--out {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.4);
+}
+
+.cx-toggle:active .cx-toggle-thumb {
+  transform: scale(0.92);
+}
+
+.cx-toggle[data-dark='false']:active .cx-toggle-thumb {
+  transform: translateX(30px) scale(0.92);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-toggle-thumb,
+  .cx-toggle-glyph {
+    transition-duration: 1ms;
+  }
+}
+
 /* ---------- interactive background ---------- */
 
 .cx-field {

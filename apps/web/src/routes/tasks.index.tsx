@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react'
+import { CalendarDays, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
@@ -350,7 +350,7 @@ function TasksPage() {
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
   const reduceMotion = useReducedMotion()
-  const { theme, toggle: toggleTheme } = useTheme()
+  const { theme } = useTheme()
 
   // The console page sits on its own phosphor screen instead of the app's paper.
   useEffect(() => {
@@ -413,15 +413,6 @@ function TasksPage() {
       </div>
 
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-9"
-          aria-label={theme === 'dark' ? '切换到亮色' : '切换到暗色'}
-          onClick={toggleTheme}
-        >
-          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" className="h-9 gap-2 px-2.5 font-normal">
