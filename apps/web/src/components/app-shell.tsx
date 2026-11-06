@@ -53,9 +53,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               size="sm"
               frame={false}
-              color={theme === 'dark' ? '#2b3a33' : '#e7ece5'}
+              theme={theme}
+              color={theme === 'dark' ? '#2b3a33' : '#e9efe7'}
               activeTextColor={theme === 'dark' ? '#eafbf2' : '#0d1712'}
-              colors={theme === 'dark' ? ['#5ef2b0', '#a8ffdc', '#9db2a7'] : ['#0f7a55', '#4ea985', '#56635b']}
+              colors={theme === 'dark' ? ['#5ef2b0', '#a8ffdc', '#9db2a7'] : ['#d7e6db', '#eef3ec', '#b9cfc1']}
               gooeyness={1.4}
               particleCount={10}
             />
