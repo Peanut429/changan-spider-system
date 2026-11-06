@@ -646,6 +646,20 @@
   background: rgba(94, 242, 176, 0.05);
 }
 
+/* ---------- interactive background ---------- */
+
+.cx-field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+:root[data-theme='light'] .cx-field {
+  opacity: 0.45;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 900px) {

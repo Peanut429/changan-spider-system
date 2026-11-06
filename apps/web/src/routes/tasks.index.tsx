@@ -11,6 +11,7 @@ import { deleteTask, getAccountTypes, getPlatforms, getTasks } from '@/lib/api'
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
+import DotGrid from '@/components/DotGrid/DotGrid'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
@@ -389,6 +390,22 @@ function TasksPage() {
 
   return (
     <div className="cx">
+      <div className="cx-field" aria-hidden="true">
+        <DotGrid
+          dotSize={2}
+          gap={26}
+          baseColor={theme === 'dark' ? '#4c9478' : '#a9bdb2'}
+          activeColor={theme === 'dark' ? '#7bffc4' : '#0f7a55'}
+          proximity={130}
+          strength={12}
+          glow={0.7}
+          opacity={theme === 'dark' ? 0.85 : 0.6}
+          fade={140}
+          stretch={0.8}
+          paused={Boolean(reduceMotion)}
+        />
+      </div>
+
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
         <Button
           variant="ghost"
