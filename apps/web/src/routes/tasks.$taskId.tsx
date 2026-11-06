@@ -67,7 +67,7 @@ const coverageMeta: Record<string, { label: string; className: string; dot: stri
 function CoverageStatus({ account }: { account: TaskAccount }) {
   const isZero = account.status === 'success' && Number(account.contentCountInWindow || 0) === 0
   const meta = isZero
-    ? { label: '成功但 0 条', className: 'text-amber-400', dot: 'bg-amber-400' }
+    ? { label: '无数据', className: 'text-amber-400', dot: 'bg-amber-400' }
     : coverageMeta[account.status] || coverageMeta.pending
   return (
     <span className={cn('inline-flex items-center gap-2 text-xs font-medium', meta.className)}>
@@ -162,7 +162,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
     { key: 'action', label: '需处理', count: failed.length + newAccounts.length },
     { key: 'failed', label: '失败', count: failed.length },
     { key: 'new', label: '新增待补', count: newAccounts.length },
-    { key: 'zero', label: '成功但 0 条', count: zero.length },
+    { key: 'zero', label: '无数据', count: zero.length },
     { key: 'success', label: '成功', count: success.length },
     { key: 'disabled', label: '已禁用', count: disabled.length },
   ]
