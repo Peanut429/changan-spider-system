@@ -300,13 +300,13 @@
 }
 
 .cx-table thead th {
-  padding: 11px 16px;
-  border-bottom: 1px solid var(--cx-thead-line);
-  background: var(--cx-thead-bg);
-  color: var(--cx-thead-ink);
-  font-size: 11.5px;
+  padding: 14px 16px 11px;
+  border-bottom: 1px solid var(--cx-line-strong);
+  background: transparent;
+  color: var(--cx-ink-2);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
   text-align: left;
   white-space: nowrap;
 }
