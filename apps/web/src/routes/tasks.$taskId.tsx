@@ -177,11 +177,12 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {filters.map((item) => (
           <button
             key={item.key}
             type="button"
+            title={item.key === 'action' ? '失败账号 + 新增待补账号' : undefined}
             onClick={() => setFilter(item.key)}
             className={cn(
               'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
@@ -191,6 +192,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
             {item.label} {item.count}
           </button>
         ))}
+        <span className="text-[10px] text-muted-foreground">“需处理” = 失败账号 + 新增待补账号</span>
       </div>
 
       {selected.size > 0 ? (

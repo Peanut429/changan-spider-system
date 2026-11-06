@@ -95,6 +95,8 @@ function taskRow(row: any): Json {
     plannedAccounts: Number(row.planned_accounts || 0),
     successAccounts: Number(row.success_accounts || 0),
     failedAccounts: Number(row.failed_accounts || 0),
+    newAccounts: 0,
+    coverageTotal: Number(row.planned_accounts || 0),
     accountMetricCount: Number(row.account_metric_count || 0),
     contentMetricCount: Number(row.content_metric_count || 0),
     rawRecordCount: Number(row.raw_record_count || 0),
@@ -193,8 +195,26 @@ async function listTasks(pool: any, date: string): Promise<Json> {
       order by coalesce(r.started_ts_ms, t.scheduled_at_ms) asc, t.priority asc`,
     [date, TIME_ZONE],
   );
-  const pending = pendingResult.rows.map(taskRow);
-  const executed = executedResult.rows.map(taskRow);
+  const pendingRows = await Promise.all(pendingResult.rows.map(async (row: any) => {
+    const task = taskRow(row);
+    const { coverage } = await loadTaskCoverage(pool, row);
+    task.successAccounts = coverage.success;
+    task.failedAccounts = coverage.failed;
+    task.newAccounts = coverage.newAccounts;
+    task.coverageTotal = coverage.total;
+    return task;
+  }));
+  const executedRows = await Promise.all(executedResult.rows.map(async (row: any) => {
+    const task = taskRow(row);
+    const { coverage } = await loadTaskCoverage(pool, row);
+    task.successAccounts = coverage.success;
+    task.failedAccounts = coverage.failed;
+    task.newAccounts = coverage.newAccounts;
+    task.coverageTotal = coverage.total;
+    return task;
+  }));
+  const pending = pendingRows;
+  const executed = executedRows;
   const summary = {
     pending: pending.length,
     running: executed.filter((task: any) => task.status === "running").length,

@@ -36,6 +36,8 @@ export type Task = {
   plannedAccounts: number
   successAccounts: number
   failedAccounts: number
+  newAccounts: number
+  coverageTotal: number
   accountMetricCount: number
   contentMetricCount: number
   rawRecordCount: number
