@@ -6,6 +6,7 @@ import {
   CircleAlert,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   FileText,
   Info,
@@ -16,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 
 import { getTask, rerunTask } from '@/lib/api'
+import { downloadTaskExcel } from '@/lib/export-task'
 import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { PageHeader } from '@/components/page-header'
@@ -446,12 +448,27 @@ function TaskDetailPage() {
         title={task.platformName}
         description="查看任务结果、账号数据和帖子数据。"
         actions={
-          <Button asChild variant="outline" size="sm" className="gap-1.5 bg-card">
-            <Link to="/tasks" search={{ date: backDate }}>
-              <ArrowLeft className="size-3.5" />
-              返回任务列表
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 bg-card"
+              onClick={() => {
+                void downloadTaskExcel({ task, accounts, contents })
+                  .then(() => toast.success('Excel 已生成'))
+                  .catch((error) => toast.error(error instanceof Error ? error.message : 'Excel 生成失败'))
+              }}
+            >
+              <Download className="size-3.5" />
+              下载 Excel
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5 bg-card">
+              <Link to="/tasks" search={{ date: backDate }}>
+                <ArrowLeft className="size-3.5" />
+                返回任务列表
+              </Link>
+            </Button>
+          </div>
         }
       />
 

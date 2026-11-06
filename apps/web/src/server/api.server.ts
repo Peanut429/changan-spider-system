@@ -237,7 +237,10 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
   const accountFilter = text(params.account);
   const accountsResult = await pool.query(
     `select a.id, a.handle, a.display_name, a.profile_url, a.active,
-            a.account_type, a.created_ts_ms, p.code as platform_code
+            a.account_type, a.metadata_json->>'source' as source,
+            to_char(to_timestamp(a.created_ts_ms/1000) at time zone 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS') as created_at,
+            to_char(to_timestamp(a.updated_ts_ms/1000) at time zone 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS') as updated_at,
+            p.code as platform_code
        from social_accounts a
        join platforms p on p.id = a.platform_id
       where a.platform_id = $1
@@ -313,6 +316,9 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
       displayName: account.display_name,
       profileUrl: account.profile_url,
       platformCode: account.platform_code,
+      source: account.source,
+      createdAt: account.created_at,
+      updatedAt: account.updated_at,
       status,
       latestRunId: latest?.run_id || null,
       latestRunStatus: latest?.run_status || null,
@@ -357,6 +363,7 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
               c.content_summary, c.publish_ts_ms,
               m.play_count, m.like_count, m.comment_count, m.share_count,
               m.collect_count, m.read_count, m.exposure_count, m.error_message,
+              to_char(to_timestamp(m.captured_ts_ms/1000) at time zone 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS') as captured_at,
               c.account_id, m.run_id, a.handle as account_handle
          from content_daily_metrics m
          join social_contents c on c.id = m.content_id
@@ -383,6 +390,8 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
         readCount: row.read_count == null ? null : Number(row.read_count),
         exposureCount: row.exposure_count == null ? null : Number(row.exposure_count),
         errorMessage: row.error_message,
+        capturedAt: row.captured_at,
+        runId: row.run_id,
         accountId: row.account_id,
         accountHandle: row.account_handle,
       }));

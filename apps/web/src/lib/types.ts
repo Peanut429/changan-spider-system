@@ -95,6 +95,9 @@ export type TaskAccount = {
   newContentCount: number | null
   errorCode: string | null
   errorMessage: string | null
+  source: string | null
+  createdAt: string | null
+  updatedAt: string | null
   latestRunId: string | null
   latestRunStatus: string | null
   latestRunStartedAt: string | null
@@ -118,6 +121,8 @@ export type TaskContent = {
   readCount: number | null
   exposureCount: number | null
   errorMessage: string | null
+  capturedAt: string | null
+  runId: string
   accountId: string
   accountHandle: string
 }
