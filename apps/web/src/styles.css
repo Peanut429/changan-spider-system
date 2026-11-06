@@ -189,6 +189,122 @@
   }
 }
 
+/* ------------------------------------------------------------------
+ * Overlay motion
+ *
+ * Tailwind's enter/leave utilities drive a single 200ms linear-ish zoom,
+ * which reads as a snap. These replace it with a settle curve: the panel
+ * arrives from slightly below and smaller, the scrim comes up under it.
+ * `scale`/`translate` are used instead of `transform` so they compose with
+ * the dialog's own centring translate.
+ * ------------------------------------------------------------------ */
+
+[data-slot='dialog-overlay'],
+[data-slot='alert-dialog-overlay'] {
+  background-color: rgba(10, 16, 13, 0.32);
+}
+
+[data-slot='dialog-overlay'][data-state='open'],
+[data-slot='alert-dialog-overlay'][data-state='open'] {
+  animation: overlay-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+[data-slot='dialog-overlay'][data-state='closed'],
+[data-slot='alert-dialog-overlay'][data-state='closed'] {
+  animation: overlay-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+:root[data-theme='dark'] [data-slot='dialog-overlay'],
+:root[data-theme='dark'] [data-slot='alert-dialog-overlay'] {
+  background-color: rgba(0, 0, 0, 0.62);
+}
+
+[data-slot='dialog-content'][data-state='open'],
+[data-slot='alert-dialog-content'][data-state='open'] {
+  animation: panel-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+[data-slot='dialog-content'][data-state='closed'],
+[data-slot='alert-dialog-content'][data-state='closed'] {
+  animation: panel-out 150ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+[data-slot='popover-content'][data-state='open'] {
+  animation: pop-in 190ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+[data-slot='popover-content'][data-state='closed'] {
+  animation: pop-out 120ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+[data-slot='dialog-content'],
+[data-slot='alert-dialog-content'] {
+  box-shadow: 0 40px 80px -46px rgba(4, 10, 7, 0.85);
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes overlay-out {
+  to { opacity: 0; }
+}
+
+/* These panels centre themselves with translate(-50%, -50%), and Tailwind v4
+ * writes that through the `translate` property — so the keyframes have to carry
+ * the centring too, otherwise the panel lands off-centre. */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+    translate: -50% calc(-50% + 10px);
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: -50% -50%;
+  }
+}
+
+@keyframes panel-out {
+  to {
+    opacity: 0;
+    scale: 0.97;
+    translate: -50% calc(-50% + 4px);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    scale: 0.93;
+    translate: 0 -6px;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='dialog-content'],
+  [data-slot='alert-dialog-content'],
+  [data-slot='popover-content'],
+  [data-slot='dialog-overlay'],
+  [data-slot='alert-dialog-overlay'] {
+    animation-duration: 1ms !important;
+  }
+}
+
 @keyframes soft-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.82); }
