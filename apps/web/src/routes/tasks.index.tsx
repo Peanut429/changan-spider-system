@@ -433,15 +433,17 @@ function TasksPage() {
           as="button"
           className="cx-cta h-9 px-4 text-[13.5px]"
           radius={6}
-          thickness={1}
+          thickness={1.5}
           color="#ffffff"
           trailColor="#d7fff0"
           backgroundColor="var(--primary)"
           textColor="var(--primary-foreground)"
           borderColor="color-mix(in oklab, var(--primary) 70%, transparent)"
-          duration={2600}
-          stars={1}
-          glow={0.9}
+          duration={1.9}
+          stars={2}
+          trailLength={0.34}
+          glow={1}
+          sparkle
           hover="lap"
           disabled={!platformsQuery.data?.platforms.length || !accountTypesQuery.data?.accountTypes.length}
           onClick={() => setCreateOpen(true)}
