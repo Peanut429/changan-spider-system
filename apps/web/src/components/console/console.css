@@ -436,6 +436,53 @@
   background: var(--cx-cell-new);
 }
 
+.cx-run {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cx-run-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--cx-ink-2);
+}
+
+.cx-run-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cx-ink-3);
+}
+
+.cx-run-detail {
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--cx-ink-3);
+}
+
+.cx-run[data-tone='running'] .cx-run-label {
+  color: var(--cx-accent);
+}
+
+.cx-run[data-tone='running'] .cx-run-label::before {
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: cx-pulse 1.6s ease-in-out infinite;
+}
+
+.cx-run[data-tone='ok'] .cx-run-label::before {
+  background: var(--cx-ok);
+}
+
+.cx-run[data-tone='fail'] .cx-run-label::before {
+  background: var(--cx-danger);
+}
+
 .cx-running {
   display: inline-flex;
   align-items: center;

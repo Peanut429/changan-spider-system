@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, Moon, Plus, RefreshCw, RotateCcw, Sun, Trash2 } from 'lucide-react'
+import { CalendarDays, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
-import { deleteTask, getAccountTypes, getPlatforms, getTasks, retryTask } from '@/lib/api'
+import { deleteTask, getAccountTypes, getPlatforms, getTasks } from '@/lib/api'
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
@@ -56,6 +56,45 @@ function taskRunClock(task: Task): string {
   if (!task.runStartedAt) return '—'
   if (!task.runFinishedAt) return `${formatClock(task.runStartedAt)} → 进行中`
   return `${formatClock(task.runStartedAt)} → ${formatClock(task.runFinishedAt)}`
+}
+
+function durationText(task: Task): string {
+  if (!task.runStartedAt) return '—'
+  const start = new Date(task.runStartedAt).getTime()
+  const end = task.runFinishedAt ? new Date(task.runFinishedAt).getTime() : Date.now()
+  if (Number.isNaN(start) || Number.isNaN(end)) return '—'
+  const minutes = Math.max(0, Math.round((end - start) / 60_000))
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return hours > 0 ? `${hours} 小时 ${rest} 分` : `${rest} 分`
+}
+
+/** Run state, not outcome: is this batch still going, or is it done? */
+function runState(task: Task): { label: string; tone: 'running' | 'ok' | 'fail' | 'idle'; detail: string } {
+  if (task.status === 'running') {
+    return { label: '运行中', tone: 'running', detail: task.runStartedAt ? `开始 ${formatClock(task.runStartedAt)}` : '已开始' }
+  }
+  if (task.status === 'cancelled') {
+    return { label: '已取消', tone: 'idle', detail: '未完成' }
+  }
+  if (task.status === 'pending') {
+    return { label: '待执行', tone: 'idle', detail: task.scheduledAt ? `计划 ${formatDateTime(task.scheduledAt)}` : '未排期' }
+  }
+  return {
+    label: '已结束',
+    tone: task.runStatus === 'partial_failed' || task.status === 'failed' ? 'fail' : 'ok',
+    detail: task.runFinishedAt ? `用时 ${durationText(task)}` : '已结束',
+  }
+}
+
+function RunCell({ task }: { task: Task }) {
+  const state = runState(task)
+  return (
+    <span className="cx-run" data-tone={state.tone}>
+      <span className="cx-run-label">{state.label}</span>
+      <span className="cx-run-detail">{state.detail}</span>
+    </span>
+  )
 }
 
 function accountsOf(task: Task): number {
@@ -167,35 +206,6 @@ function DeleteTaskButton({ task, onDelete, deleting }: { task: Task; onDelete: 
   )
 }
 
-function RetryTaskButton({ task, onRetry, retrying }: { task: Task; onRetry: (task: Task) => void; retrying: boolean }) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <button
-          type="button"
-          className="cx-link"
-          disabled={retrying}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <RotateCcw className="size-3.5" />继续执行
-        </button>
-      </AlertDialogTrigger>
-      <AlertDialogContent className="cx-portal">
-        <AlertDialogHeader>
-          <AlertDialogTitle>继续执行这个任务？</AlertDialogTitle>
-          <AlertDialogDescription>
-            会复用原来的执行记录，跳过已成功的账号，只重跑失败和未完成的账号。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={() => onRetry(task)}>继续执行</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
-
 function ViewTaskLink({ task, date }: { task: Task; date: string }) {
   return (
     <Link
@@ -215,7 +225,6 @@ function PlatformCell({ task }: { task: Task }) {
     <span className="cx-plat">
       <i style={{ color: platformColor(task.platformCode) }} aria-hidden="true" />
       <span className="cx-cell-main">{task.platformName || task.platformCode}</span>
-      {task.status === 'running' ? <span className="cx-running">执行中</span> : null}
     </span>
   )
 }
@@ -230,6 +239,7 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
           <th>账号类型</th>
           <th>周期（UTC+8）</th>
           <th>计划执行</th>
+          <th>运行</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>
@@ -245,6 +255,7 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
             <td data-label="账号类型">{task.accountType || '—'}</td>
             <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
             <td data-label="计划执行"><span className="cx-window">{formatDateTime(task.scheduledAt)}</span></td>
+            <td data-label="运行"><RunCell task={task} /></td>
             <td data-label="操作" className="cx-right">
               <div className="cx-row-actions">
                 <ViewTaskLink task={task} date={date} />
@@ -258,17 +269,7 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
   )
 }
 
-function ExecutedTable({
-  tasks,
-  date,
-  onRetry,
-  retryingId,
-}: {
-  tasks: Task[]
-  date: string
-  onRetry: (task: Task) => void
-  retryingId: string | null
-}) {
+function ExecutedTable({ tasks, date }: { tasks: Task[]; date: string }) {
   const reduceMotion = useReducedMotion()
 
   return (
@@ -281,6 +282,7 @@ function ExecutedTable({
           <th className="cx-num">账号覆盖</th>
           <th className="cx-num">内容</th>
           <th data-hide-mobile="true">执行时段</th>
+          <th>运行</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>
@@ -306,12 +308,10 @@ function ExecutedTable({
             </td>
             <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
             <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
+            <td data-label="运行"><RunCell task={task} /></td>
             <td data-label="操作" className="cx-right">
               <div className="cx-row-actions">
                 <ViewTaskLink task={task} date={date} />
-                {task.status === 'failed' ? (
-                  <RetryTaskButton task={task} onRetry={onRetry} retrying={retryingId === task.id} />
-                ) : null}
               </div>
             </td>
           </motion.tr>
@@ -342,7 +342,6 @@ function TasksPage() {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [retryingId, setRetryingId] = useState<string | null>(null)
   const [sweep, setSweep] = useState(1)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const query = useQuery({ queryKey: ['tasks', date], queryFn: () => getTasks(date) })
@@ -357,19 +356,6 @@ function TasksPage() {
     document.documentElement.classList.add('cx-page')
     return () => document.documentElement.classList.remove('cx-page')
   }, [])
-
-  const handleRetry = async (task: Task) => {
-    setRetryingId(task.id)
-    try {
-      await retryTask(task.id)
-      toast.success('任务已重新排队')
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '任务重新排队失败')
-    } finally {
-      setRetryingId(null)
-    }
-  }
 
   const handleDelete = async (task: Task) => {
     setDeletingId(task.id)
@@ -491,12 +477,7 @@ function TasksPage() {
               {!reduceMotion ? <span className="cx-crt" aria-hidden="true" /> : null}
               {!reduceMotion ? <span key={sweep} className="cx-sweep" aria-hidden="true" /> : null}
               {query.data.executed.length > 0 ? (
-                <ExecutedTable
-                  tasks={query.data.executed}
-                  date={date}
-                  onRetry={handleRetry}
-                  retryingId={retryingId}
-                />
+                <ExecutedTable tasks={query.data.executed} date={date} />
               ) : (
                 <p className="cx-empty-row">今天还没有执行记录。任务开始执行后会归到实际开始的那一天。</p>
               )}
