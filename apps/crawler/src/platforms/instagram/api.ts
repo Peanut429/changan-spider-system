@@ -244,7 +244,14 @@ export async function scrapeInstagramApiReels({
 
   while (!shouldStop) {
     pages += 1;
-    const page = await fetchInstagramApiReelsPage({ userId, paginationToken, client, account });
+    let page;
+    try {
+      page = await fetchInstagramApiReelsPage({ userId, paginationToken, client, account });
+    } catch (error: any) {
+      console.warn(`账号 ${account} Reels 接口不可用，按当前已抓取结果处理：${error?.message || String(error)}`);
+      if (pages === 1) return { pages: 0, fetched: 0, kept: 0, pageResponses };
+      break;
+    }
     pageResponses.push(page.rawResponse);
     responseCollector?.push(page.rawResponse);
     const items = Array.isArray(page.data?.data?.items) ? page.data.data.items : [];
@@ -398,7 +405,7 @@ async function fetchInstagramApiReelsPage({
   const url = new URL(TIKHUB_USER_REELS_URL);
   url.searchParams.set("user_id", userId);
   if (paginationToken) url.searchParams.set("pagination_token", paginationToken);
-  const json = await fetchTikHubJson(url, client, "用户Reels列表", validateTikHubReelsJson, account);
+  const json = await fetchTikHubJson(url, client, "用户Reels列表", validateTikHubReelsJson, account, 3);
   return { data: json.data || {}, requestId: json.request_id || "", rawResponse: json };
 }
 
@@ -484,7 +491,8 @@ export async function fetchTikHubJsonOnce(url: URL, client: InstagramApiClient, 
     const error: any = new Error(`TikHub ${label}接口失败：HTTP ${response.status} code=${apiCode} message=${apiMessage}`.trim());
     error.status = response.status;
     error.code = apiCode;
-    error.retryable = !(charged || businessFailed);
+    const resourceMissing = /requested resource does not exist/i.test(apiMessage);
+    error.retryable = !(charged || businessFailed || resourceMissing);
     attachTikHubErrorContext(error, {
       url,
       label,
