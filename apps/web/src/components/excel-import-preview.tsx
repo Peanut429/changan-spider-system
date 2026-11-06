@@ -549,7 +549,7 @@ export function ExcelImportPreview({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[1180px]">
+      <DialogContent className="cx-portal max-h-[92vh] overflow-y-auto sm:max-w-[1180px]">
         <DialogHeader>
           <DialogTitle>Excel 导入预览</DialogTitle>
           <DialogDescription>
@@ -605,7 +605,7 @@ export function ExcelImportPreview({
                 <p className="text-xs font-medium">导入到账号类型</p>
                 <Select value={accountType} onValueChange={setAccountType}>
                   <SelectTrigger className="w-full"><SelectValue placeholder="选择账号类型" /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="cx-portal">
                     {accountTypes.map((type) => (
                       <SelectItem key={type} value={type}>{type}</SelectItem>
                     ))}
@@ -631,7 +631,7 @@ export function ExcelImportPreview({
                 <p className="text-xs font-medium">工作表</p>
                 <Select value={activeSheet} onValueChange={(value) => void selectSheet(value)}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="cx-portal">
                     {sheetNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -640,7 +640,7 @@ export function ExcelImportPreview({
                 <p className="text-xs font-medium">表头行</p>
                 <Select value={String(headerRow)} onValueChange={changeHeaderRow}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="cx-portal">
                     {headerOptions.map((option) => (
                       <SelectItem key={option.index} value={String(option.index)}>{option.label}</SelectItem>
                     ))}
@@ -663,7 +663,7 @@ export function ExcelImportPreview({
                       onValueChange={(value) => setMapping((current) => ({ ...current, [field.key]: value }))}
                     >
                       <SelectTrigger className="h-8 w-full text-xs"><SelectValue placeholder="不映射" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="cx-portal">
                         <SelectItem value={NONE}>不映射</SelectItem>
                         {headers.map((header, index) => (
                           <SelectItem key={`${header}-${index}`} value={String(index)}>{header}</SelectItem>
@@ -686,10 +686,10 @@ export function ExcelImportPreview({
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">平台</span>
+                <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">平台</span>
                 <Select value={platformFilter} onValueChange={setPlatformFilter}>
                   <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="cx-portal">
                     <SelectItem value="all">全部平台</SelectItem>
                     {platformOptions.map((option) => (
                       <SelectItem key={option.code} value={option.code}>{option.label}</SelectItem>

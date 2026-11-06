@@ -595,6 +595,12 @@
   color: var(--cx-ink-3);
 }
 
+/* Field labels sit beside controls; they must never break mid-word. */
+.cx label,
+.cx-portal label {
+  white-space: nowrap;
+}
+
 /* ---------- shadcn surfaces adapted to the console ---------- */
 
 .cx [data-slot='card'] {
@@ -801,6 +807,7 @@
 .cx-pager-meta {
   font-size: 12px;
   color: var(--cx-ink-3);
+  white-space: nowrap;
 }
 
 .cx-pager-controls {

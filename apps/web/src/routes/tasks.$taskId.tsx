@@ -262,12 +262,12 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
                 <TableCell>
                   {account.errorMessage ? (
                     <span className="line-clamp-2 max-w-[220px] text-[11px] text-rose-700" title={account.errorMessage}>{account.errorMessage}</span>
-                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                  ) : <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">—</span>}
                 </TableCell>
                 <TableCell className="text-right">
                   {account.status !== 'disabled' ? (
                     <Button size="sm" variant="ghost" onClick={() => ask('selected', [account.accountId])}>重跑</Button>
-                  ) : <span className="text-[11px] text-muted-foreground">不可操作</span>}
+                  ) : <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">不可操作</span>}
                 </TableCell>
               </TableRow>
             ))}

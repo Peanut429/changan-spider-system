@@ -106,7 +106,7 @@ export function AccountDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[560px]">
+      <DialogContent className="cx-portal max-h-[90vh] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑账号' : '添加账号'}</DialogTitle>
           <DialogDescription>
@@ -125,7 +125,7 @@ export function AccountDialog({
               <SelectTrigger id="account-platform" className="w-full">
                 <SelectValue placeholder="选择平台" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="cx-portal">
                 {platforms.map((platform) => (
                   <SelectItem key={platform.id} value={platform.id}>{platform.name}</SelectItem>
                 ))}
@@ -150,7 +150,7 @@ export function AccountDialog({
                 onValueChange={(value) => setForm((current) => ({ ...current, accountType: value }))}
               >
                 <SelectTrigger className="w-full"><SelectValue placeholder="选择账号类型" /></SelectTrigger>
-                <SelectContent>
+                <SelectContent className="cx-portal">
                   {accountTypes.map((type) => (
                     <SelectItem key={type} value={type}>{type}</SelectItem>
                   ))}

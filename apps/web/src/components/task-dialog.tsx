@@ -139,7 +139,7 @@ export function TaskDialog({
             <Label>抓取时间范围</Label>
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <Input type="date" value={windowStart} onChange={(event) => setWindowStart(event.target.value)} />
-              <span className="text-xs text-muted-foreground">至</span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">至</span>
               <Input type="date" value={windowEnd} onChange={(event) => setWindowEnd(event.target.value)} />
             </div>
             <p className="text-[11px] text-muted-foreground">按北京时间（UTC+8）计算：开始日 00:00:00，结束日 23:59:59。</p>
