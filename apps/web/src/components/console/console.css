@@ -653,11 +653,18 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.85;
 }
 
-:root[data-theme='light'] .cx-field {
-  opacity: 0.45;
+/* Keep the paint behind the data: a wash that is heavier where text sits. */
+.cx-field::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 11, 9, 0.86) 0%, rgba(7, 11, 9, 0.62) 38%, rgba(7, 11, 9, 0.84) 100%);
+}
+
+:root[data-theme='light'] .cx-field::after {
+  background: linear-gradient(180deg, rgba(243, 244, 240, 0.78) 0%, rgba(243, 244, 240, 0.56) 40%, rgba(243, 244, 240, 0.82) 100%);
 }
 
 /* ---------- responsive ---------- */

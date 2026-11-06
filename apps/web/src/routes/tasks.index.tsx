@@ -11,7 +11,7 @@ import { deleteTask, getAccountTypes, getPlatforms, getTasks } from '@/lib/api'
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
-import DotGrid from '@/components/DotGrid/DotGrid'
+import Balatro from '@/components/Balatro/Balatro'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
@@ -391,18 +391,24 @@ function TasksPage() {
   return (
     <div className="cx">
       <div className="cx-field" aria-hidden="true">
-        <DotGrid
-          dotSize={2}
-          gap={26}
-          baseColor={theme === 'dark' ? '#4c9478' : '#a9bdb2'}
-          activeColor={theme === 'dark' ? '#7bffc4' : '#0f7a55'}
-          proximity={130}
-          strength={12}
-          glow={0.7}
-          opacity={theme === 'dark' ? 0.85 : 0.6}
-          fade={140}
-          stretch={0.8}
-          paused={Boolean(reduceMotion)}
+        <Balatro
+          color1={theme === 'dark' ? '#04100c' : '#e9efea'}
+          color2={theme === 'dark' ? '#0a3d2c' : '#a8c4b6'}
+          color3={theme === 'dark' ? '#2fae7d' : '#0f7a55'}
+          swirl={0.7}
+          speed={0.35}
+          rotationSpeed={0.12}
+          scale={1.1}
+          detail={3}
+          pixelSize={2}
+          contrast={1.1}
+          lighting={0.4}
+          mouseInteraction
+          mouseStrength={0.7}
+          clickSwirl
+          lightMode={theme === 'light'}
+          opacity={theme === 'dark' ? 0.5 : 0.7}
+          maxDevicePixelRatio={1.5}
         />
       </div>
 
