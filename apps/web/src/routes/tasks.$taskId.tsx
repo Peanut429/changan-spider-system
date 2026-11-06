@@ -23,6 +23,7 @@ import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, fo
 import GlareHover from '@/components/GlareHover/GlareHover'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { ConsoleBar } from '@/components/console/console-bar'
+import { useTheme } from '@/lib/theme'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
 import { platformColor } from '@/components/console/platform-color'
@@ -405,6 +406,8 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
 function TaskDetailPage() {
   const { taskId } = Route.useParams()
   const reduceMotion = useReducedMotion()
+  const { theme } = useTheme()
+  const dark = theme === 'dark'
   const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) })
 
   if (query.isPending) {
@@ -537,8 +540,10 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor="#5ef2b0"
-                glareOpacity={0.16}
+                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
+                glareOpacity={dark ? 0.18 : 0.22}
+                blendMode={dark ? 'screen' : 'multiply'}
+                playOnce
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
@@ -560,8 +565,10 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor="#5ef2b0"
-                glareOpacity={0.16}
+                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
+                glareOpacity={dark ? 0.18 : 0.22}
+                blendMode={dark ? 'screen' : 'multiply'}
+                playOnce
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
@@ -581,8 +588,10 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor="#5ef2b0"
-                glareOpacity={0.16}
+                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
+                glareOpacity={dark ? 0.18 : 0.22}
+                blendMode={dark ? 'screen' : 'multiply'}
+                playOnce
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
