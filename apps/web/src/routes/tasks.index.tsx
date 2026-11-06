@@ -2,14 +2,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { CalendarDays, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
 import { deleteTask, getAccountTypes, getPlatforms, getTasks, retryTask } from '@/lib/api'
 import type { Task } from '@/lib/types'
-import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
+import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatWindow, todayKey } from '@/lib/format'
+import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
+import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
 import { platformColor } from '@/components/console/platform-color'
 import { TaskDialog } from '@/components/task-dialog'
 import {
@@ -66,8 +69,8 @@ function Coverage({ success, total, failed, pending }: { success: number; total:
   return (
     <span className="cx-cover">
       <span className="cx-cover-num">
-        {formatNumber(success)}
-        <span>/{formatNumber(total)}</span>
+        <AnimatedNumber value={success} />
+        <span>/<AnimatedNumber value={total} /></span>
       </span>
       {failed > 0 || pending > 0 ? (
         <span className="cx-cover-note">
@@ -89,7 +92,7 @@ function DeleteTaskButton({ task, onDelete, deleting }: { task: Task; onDelete: 
           <Trash2 className="size-3.5" />
         </button>
       </AlertDialogTrigger>
-      <AlertDialogContent>
+      <AlertDialogContent className="cx-portal">
         <AlertDialogHeader>
           <AlertDialogTitle>删除这个任务？</AlertDialogTitle>
           <AlertDialogDescription>
@@ -119,7 +122,7 @@ function RetryTaskButton({ task, onRetry, retrying }: { task: Task; onRetry: (ta
           <RotateCcw className="size-3.5" />继续执行
         </button>
       </AlertDialogTrigger>
-      <AlertDialogContent>
+      <AlertDialogContent className="cx-portal">
         <AlertDialogHeader>
           <AlertDialogTitle>继续执行这个任务？</AlertDialogTitle>
           <AlertDialogDescription>
@@ -154,6 +157,7 @@ function PlatformCell({ task }: { task: Task }) {
 }
 
 function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; date: string; onDelete: (task: Task) => void; deletingId: string | null }) {
+  const reduceMotion = useReducedMotion()
   return (
     <table className="cx-table">
       <thead>
@@ -166,8 +170,13 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
         </tr>
       </thead>
       <tbody>
-        {tasks.map((task) => (
-          <tr key={task.id}>
+        {tasks.map((task, index) => (
+          <motion.tr
+            key={task.id}
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ ...ROW_IN, delay: Math.min(index * ROW_STAGGER, 0.2) }}
+          >
             <td data-block="true"><PlatformCell task={task} /></td>
             <td data-label="账号类型">{task.accountType || '—'}</td>
             <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
@@ -178,7 +187,7 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
                 <DeleteTaskButton task={task} onDelete={onDelete} deleting={deletingId === task.id} />
               </div>
             </td>
-          </tr>
+          </motion.tr>
         ))}
       </tbody>
     </table>
@@ -196,6 +205,7 @@ function ExecutedTable({
   onRetry: (task: Task) => void
   retryingId: string | null
 }) {
+  const reduceMotion = useReducedMotion()
   return (
     <table className="cx-table">
       <thead>
@@ -210,8 +220,13 @@ function ExecutedTable({
         </tr>
       </thead>
       <tbody>
-        {tasks.map((task) => (
-          <tr key={task.id}>
+        {tasks.map((task, index) => (
+          <motion.tr
+            key={task.id}
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ ...ROW_IN, delay: Math.min(index * ROW_STAGGER, 0.2) }}
+          >
             <td data-block="true"><PlatformCell task={task} /></td>
             <td data-label="账号类型">{task.accountType || '—'}</td>
             <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
@@ -223,7 +238,7 @@ function ExecutedTable({
                 pending={task.newAccounts}
               />
             </td>
-            <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
+            <td data-label="内容" className="cx-num"><AnimatedNumber value={task.contentMetricCount} /></td>
             <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
             <td data-label="操作" className="cx-right">
               <div className="cx-row-actions">
@@ -233,7 +248,7 @@ function ExecutedTable({
                 ) : null}
               </div>
             </td>
-          </tr>
+          </motion.tr>
         ))}
       </tbody>
     </table>
@@ -266,6 +281,7 @@ function TasksPage() {
   const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: getPlatforms })
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
+  const reduceMotion = useReducedMotion()
 
   const handleRetry = async (task: Task) => {
     setRetryingId(task.id)
@@ -313,7 +329,7 @@ function TasksPage() {
               {dateLabel}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-auto p-0">
+          <PopoverContent align="end" className="cx-portal w-auto p-0">
             <Calendar mode="single" selected={selectedDate} onSelect={changeDate} locale={zhCN} />
           </PopoverContent>
         </Popover>
@@ -355,14 +371,21 @@ function TasksPage() {
               )}
             </div>
             {query.data.pending.length > 0 ? (
-              <div className="cx-surface">
+              <motion.div
+                key={`pending-${date}`}
+                className="cx-surface"
+                data-fetching={query.isFetching ? 'true' : undefined}
+                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={ROW_IN}
+              >
                 <PendingTable
                   tasks={query.data.pending}
                   date={date}
                   onDelete={handleDelete}
                   deletingId={deletingId}
                 />
-              </div>
+              </motion.div>
             ) : null}
           </section>
 
@@ -371,7 +394,14 @@ function TasksPage() {
               <h2 className="cx-h2">执行记录</h2>
               <span className="cx-count">{query.data.executed.length} 个批次</span>
             </div>
-            <div className="cx-surface">
+            <motion.div
+              key={`executed-${date}`}
+              className="cx-surface"
+              data-fetching={query.isFetching ? 'true' : undefined}
+              initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={ROW_IN}
+            >
               {query.data.executed.length > 0 ? (
                 <ExecutedTable
                   tasks={query.data.executed}
@@ -382,7 +412,7 @@ function TasksPage() {
               ) : (
                 <p className="cx-empty-row">今天还没有执行记录。任务开始执行后会归到实际开始的那一天。</p>
               )}
-            </div>
+            </motion.div>
           </section>
         </>
       ) : null}

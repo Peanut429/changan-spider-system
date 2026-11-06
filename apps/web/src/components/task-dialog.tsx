@@ -96,7 +96,7 @@ export function TaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[560px]">
+      <DialogContent className="cx-portal max-h-[90vh] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>创建任务</DialogTitle>
           <DialogDescription>设置平台、账号类型和抓取时间。</DialogDescription>

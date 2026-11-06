@@ -7,7 +7,12 @@
  * keeps the current theme until this page is signed off.
  */
 
-.cx {
+/*
+ * `.cx` scopes the page; `.cx-portal` carries the same tokens onto portaled
+ * surfaces (dialogs, popovers, alerts) that render outside the page tree.
+ */
+.cx,
+.cx-portal {
   --radius: 6px;
   --radius-sm: 4px;
   --radius-md: 5px;
@@ -35,7 +40,9 @@
 
   --cx-ok: #4a6b57;
   --cx-fail: #c2452c;
+}
 
+.cx {
   color: var(--cx-ink);
   font-size: 14px;
 }
@@ -120,6 +127,11 @@
   overflow: hidden;
 }
 
+/* A refresh dims the current numbers instead of blanking the table. */
+.cx-surface[data-fetching='true'] .cx-table {
+  opacity: 0.45;
+}
+
 /* ---------- table ---------- */
 
 .cx-table {
@@ -127,6 +139,7 @@
   border-collapse: collapse;
   font-size: 13.5px;
   font-variant-numeric: tabular-nums;
+  transition: opacity 180ms ease-out;
 }
 
 .cx-table thead th {
@@ -148,6 +161,10 @@
 
 .cx-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.cx-table tbody tr {
+  transition: background-color 140ms ease-out;
 }
 
 .cx-table tbody tr:hover {
@@ -262,6 +279,11 @@
   background: none;
   border: 0;
   cursor: pointer;
+  transition: background-color 120ms ease-out, transform 90ms ease-out;
+}
+
+.cx-link:active {
+  transform: scale(0.96);
 }
 
 .cx-link:hover {

@@ -1,5 +1,6 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MotionConfig } from 'motion/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { AppShell } from '@/components/app-shell'
@@ -40,10 +41,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <TooltipProvider delayDuration={250}>
-            <AppShell>{children}</AppShell>
-            <Toaster position="top-right" richColors closeButton />
-          </TooltipProvider>
+          <MotionConfig reducedMotion="user">
+            <TooltipProvider delayDuration={250}>
+              <AppShell>{children}</AppShell>
+              <Toaster position="top-right" richColors closeButton />
+            </TooltipProvider>
+          </MotionConfig>
         </QueryClientProvider>
         <Scripts />
       </body>
