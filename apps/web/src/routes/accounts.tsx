@@ -20,6 +20,8 @@ import { getAccountTypes, getAccounts, getPlatforms, updateAccountActive } from 
 import type { Account } from '@/lib/types'
 import { formatDateTime } from '@/lib/format'
 import { PageHeader } from '@/components/page-header'
+import { StatCard } from '@/components/stat-card'
+import ClickSpark from '@/components/ClickSpark/ClickSpark'
 import { PlatformBadge } from '@/components/platform-badge'
 import { AccountDialog } from '@/components/account-dialog'
 import { ExcelImportPreview } from '@/components/excel-import-preview'
@@ -118,49 +120,38 @@ function AccountsPage() {
               <FileSpreadsheet className="size-4" />
               Excel 导入预览
             </Button>
-            <Button
-              className="gap-1.5"
-              onClick={() => {
-                setEditing(null)
-                setDialogOpen(true)
-              }}
-              disabled={!platforms.length || !accountTypes.length}
+            <ClickSpark
+              sparkColor={['#34d399', '#6ee7b7', '#a7f3d0']}
+              sparkSize={7}
+              sparkRadius={30}
+              sparkCount={12}
+              duration={520}
+              easing="ease-out"
+              shape="line"
+              glow={0.7}
+              className="inline-flex"
+              style={{ width: 'auto', height: 'auto' }}
             >
-              <CirclePlus className="size-4" />
-              添加账号
-            </Button>
+              <Button
+                className="gap-1.5"
+                onClick={() => {
+                  setEditing(null)
+                  setDialogOpen(true)
+                }}
+                disabled={!platforms.length || !accountTypes.length}
+              >
+                <CirclePlus className="size-4" />
+                添加账号
+              </Button>
+            </ClickSpark>
           </>
         }
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card className="bg-card/80">
-          <CardContent className="flex items-center justify-between py-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">当前结果</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">{accounts.length}</p>
-            </div>
-            <UsersRound className="size-5 text-muted-foreground/60" />
-          </CardContent>
-        </Card>
-        <Card className="bg-card/80">
-          <CardContent className="flex items-center justify-between py-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">启用</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-700">{activeCount}</p>
-            </div>
-            <ShieldCheck className="size-5 text-emerald-600/60" />
-          </CardContent>
-        </Card>
-        <Card className="bg-card/80">
-          <CardContent className="flex items-center justify-between py-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">停用</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums text-muted-foreground">{inactiveCount}</p>
-            </div>
-            <ShieldOff className="size-5 text-muted-foreground/50" />
-          </CardContent>
-        </Card>
+        <StatCard label="当前结果" value={accounts.length} icon={UsersRound} />
+        <StatCard label="启用" value={activeCount} icon={ShieldCheck} tone="success" delay={0.04} />
+        <StatCard label="停用" value={inactiveCount} icon={ShieldOff} tone="muted" delay={0.08} />
       </div>
 
       <Card>
@@ -222,11 +213,11 @@ function AccountsPage() {
               initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.28 }}
-              className="overflow-x-auto rounded-xl border border-border/80"
+              className="overflow-x-auto rounded-2xl border border-border/70 shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]"
             >
               <Table className="min-w-[820px]">
                 <TableHeader>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
                     <TableHead className="min-w-[220px]">账号</TableHead>
                     <TableHead>平台</TableHead>
                     <TableHead>类型</TableHead>

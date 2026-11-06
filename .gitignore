@@ -13,3 +13,5 @@ coverage
 
 .pnpm-home
 .pnpm-cache
+
+.ui-review/

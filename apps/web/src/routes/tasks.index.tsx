@@ -25,6 +25,7 @@ import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatCount, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
+import ClickSpark from '@/components/ClickSpark/ClickSpark'
 import { PlatformBadge } from '@/components/platform-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { SummaryCard } from '@/components/summary-card'
@@ -192,10 +193,10 @@ function PendingTable({ tasks, onDelete, deletingId }: { tasks: Task[]; onDelete
     )
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
+    <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
       <Table className="min-w-[980px]">
         <TableHeader>
-          <TableRow className="bg-muted/40 hover:bg-muted/40">
+          <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
             <TableHead className="w-[150px]">计划执行</TableHead>
             <TableHead>账号类型</TableHead>
             <TableHead>平台</TableHead>
@@ -242,10 +243,10 @@ function ExecutedTable({ tasks, onRetry, retryingId }: { tasks: Task[]; onRetry:
     )
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
+    <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
       <Table className="min-w-[980px]">
         <TableHeader>
-          <TableRow className="bg-muted/40 hover:bg-muted/40">
+          <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
             <TableHead className="min-w-[190px]">平台 / 任务</TableHead>
             <TableHead>账号类型</TableHead>
             <TableHead>抓取范围（UTC+8）</TableHead>
@@ -362,14 +363,27 @@ function TasksPage() {
         description="查看当天抓取任务和执行结果。"
         actions={
           <>
-            <Button
-              className="h-9 gap-1.5"
-              onClick={() => setCreateOpen(true)}
-              disabled={!platformsQuery.data?.platforms.length || !accountTypesQuery.data?.accountTypes.length}
+            <ClickSpark
+              sparkColor={['#34d399', '#6ee7b7', '#a7f3d0']}
+              sparkSize={7}
+              sparkRadius={30}
+              sparkCount={12}
+              duration={520}
+              easing="ease-out"
+              shape="line"
+              glow={0.7}
+              className="inline-flex"
+              style={{ width: 'auto', height: 'auto' }}
             >
-              <Plus className="size-4" />
-              创建任务
-            </Button>
+              <Button
+                className="h-9 gap-1.5"
+                onClick={() => setCreateOpen(true)}
+                disabled={!platformsQuery.data?.platforms.length || !accountTypesQuery.data?.accountTypes.length}
+              >
+                <Plus className="size-4" />
+                创建任务
+              </Button>
+            </ClickSpark>
             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="h-9 gap-2 bg-card">
@@ -448,6 +462,7 @@ function TasksPage() {
             <div className="flex items-end justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
+                  <span className="h-4 w-1 rounded-full bg-gradient-to-b from-emerald-400 to-teal-500" />
                   <h2 className="text-sm font-semibold tracking-tight">待执行</h2>
                   <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">{query.data.pending.length}</Badge>
                 </div>
@@ -466,6 +481,7 @@ function TasksPage() {
             <div className="flex items-end justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
+                  <span className="h-4 w-1 rounded-full bg-gradient-to-b from-emerald-400 to-teal-500" />
                   <h2 className="text-sm font-semibold tracking-tight">执行记录</h2>
                   <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">{query.data.executed.length}</Badge>
                 </div>

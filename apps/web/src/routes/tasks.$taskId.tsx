@@ -207,10 +207,10 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
         </div>
       ) : null}
 
-      <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
+      <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
         <Table className="min-w-[1080px]">
           <TableHeader>
-            <TableRow className="bg-muted/40 hover:bg-muted/40">
+            <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
               <TableHead className="w-10">
                 <Checkbox
                   checked={allSelected ? true : selectable.some((a) => selected.has(a.accountId)) ? 'indeterminate' : false}
@@ -335,10 +335,10 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
           </Select>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
+      <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
         <Table className="min-w-[1120px]">
           <TableHeader>
-            <TableRow className="bg-muted/40 hover:bg-muted/40">
+            <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
               <TableHead className="min-w-[280px]">内容</TableHead>
               <TableHead className="min-w-[170px]">账号</TableHead>
               <TableHead className="w-[90px]">类型</TableHead>
@@ -557,7 +557,7 @@ function TaskDetailPage() {
                 <CardContent className="p-0">
                   <Table>
                     <TableHeader>
-                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
                         <TableHead>类型</TableHead>
                         <TableHead>状态</TableHead>
                         <TableHead className="text-right">账号</TableHead>
