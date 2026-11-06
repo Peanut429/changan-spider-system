@@ -2,14 +2,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { CalendarDays, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
-import { motion, useReducedMotion, useSpring } from 'motion/react'
+import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
 import { deleteTask, getAccountTypes, getPlatforms, getTasks, retryTask } from '@/lib/api'
 import type { Task } from '@/lib/types'
-import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatWindow, todayKey } from '@/lib/format'
+import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
@@ -93,7 +93,7 @@ function CoverageArray({ success, failed, pending, total }: { success: number; f
               : index < success + failed + pending
                 ? 'new'
                 : 'idle'
-        return <span key={index} className="cx-cell" data-state={state} style={{ ['--i' as string]: index }} />
+        return <span key={index} className="cx-cell" data-state={state} />
       })}
     </span>
   )
@@ -114,7 +114,7 @@ function Coverage({
     <span className="cx-cover">
       <span className="cx-cover-num">
         <AnimatedNumber value={success} />
-        <span>/<AnimatedNumber value={total} /></span>
+        <span>/{formatNumber(total)}</span>
       </span>
       <CoverageArray success={success} total={total} failed={failed} pending={pending} />
       {failed > 0 || pending > 0 ? (
@@ -303,7 +303,7 @@ function ExecutedTable({
                 pending={task.newAccounts}
               />
             </td>
-            <td data-label="内容" className="cx-num"><AnimatedNumber value={task.contentMetricCount} /></td>
+            <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
             <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
             <td data-label="操作" className="cx-right">
               <div className="cx-row-actions">
@@ -344,8 +344,6 @@ function TasksPage() {
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const [sweep, setSweep] = useState(1)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const tiltX = useSpring(0, { bounce: 0, duration: 0.5 })
-  const tiltY = useSpring(0, { bounce: 0, duration: 0.5 })
   const query = useQuery({ queryKey: ['tasks', date], queryFn: () => getTasks(date) })
   const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: getPlatforms })
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
@@ -395,23 +393,6 @@ function TasksPage() {
     void query.refetch()
   }
 
-  // The panel is a physical object: it leans toward the pointer and its
-  // highlight moves with it.
-  const trackPointer = (event: React.PointerEvent<HTMLDivElement>) => {
-    const surface = surfaceRef.current
-    if (!surface) return
-    const rect = surface.getBoundingClientRect()
-    surface.style.setProperty('--mx', `${event.clientX - rect.left}px`)
-    surface.style.setProperty('--my', `${event.clientY - rect.top}px`)
-    if (reduceMotion) return
-    tiltY.set(((event.clientX - rect.left) / rect.width - 0.5) * 10)
-    tiltX.set(-((event.clientY - rect.top) / rect.height - 0.5) * 6)
-  }
-
-  const resetTilt = () => {
-    tiltX.set(0)
-    tiltY.set(0)
-  }
 
   const dateLabel = format(selectedDate, 'yyyy年M月d日 EEEE', { locale: zhCN })
 
@@ -419,11 +400,6 @@ function TasksPage() {
 
   return (
     <div className="cx">
-      <div className="cx-ambient" aria-hidden="true">
-        <i />
-        <i />
-      </div>
-
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
@@ -495,9 +471,6 @@ function TasksPage() {
               ref={surfaceRef}
               className="cx-surface"
               data-fetching={query.isFetching ? 'true' : undefined}
-              onPointerMove={trackPointer}
-              onPointerLeave={resetTilt}
-              style={{ rotateX: tiltX, rotateY: tiltY, transformPerspective: 1500 }}
               initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={ROW_IN}
