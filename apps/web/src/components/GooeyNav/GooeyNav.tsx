@@ -365,7 +365,12 @@ const GooeyNav = ({
   settingsRef.current = settings;
 
   const select = (index: number) => {
-    if (index === current) return;
+    // The active item can still be a useful target: on /tasks/:id the top nav
+    // keeps 任务数据 highlighted, and clicking it must return to the list.
+    if (index === current) {
+      onChange?.(index, items[index]);
+      return;
+    }
     if (activeIndex === undefined) setInnerIndex(index);
     onChange?.(index, items[index]);
   };

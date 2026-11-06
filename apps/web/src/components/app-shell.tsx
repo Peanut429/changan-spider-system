@@ -22,9 +22,22 @@ function BrandMark() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const searchDate = useRouterState({
+    select: (state) => {
+      const date = new URLSearchParams(state.location.searchStr).get('date')
+      return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
+    },
+  })
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const section = pathname.startsWith('/accounts') ? '/accounts' : '/tasks'
+  const openSection = (index: number) => {
+    const target = index === 1 ? '/accounts' : '/tasks'
+    const atSectionRoot = pathname === '/tasks' || pathname === '/tasks/' || pathname === '/accounts'
+    if (target === section && atSectionRoot) return
+    if (target === '/tasks') navigate({ to: '/tasks', search: { date: searchDate ?? todayKey() } })
+    else navigate({ to: '/accounts' })
+  }
 
   return (
     <div className="min-h-screen">
@@ -47,12 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <GooeyNav
               items={NAV_ITEMS.map((item) => ({ label: item.label, icon: item.icon }))}
               activeIndex={section === '/accounts' ? 1 : 0}
-              onChange={(index) => {
-                const target = index === 1 ? '/accounts' : '/tasks'
-                if (target === section) return
-                if (target === '/tasks') navigate({ to: '/tasks', search: { date: todayKey() } })
-                else navigate({ to: '/accounts' })
-              }}
+              onChange={openSection}
               size="sm"
               frame={false}
               theme={theme}

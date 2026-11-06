@@ -89,6 +89,7 @@ function taskRow(row: any): Json {
     runId: row.run_id,
     lastError: row.last_error,
     runStatus: row.run_status,
+    runErrorCode: row.error_code,
     runStartedAt: iso(row.started_ts_ms),
     runFinishedAt: iso(row.finished_ts_ms),
     totalAccounts: Number(row.total_accounts || 0),
@@ -106,6 +107,57 @@ function taskRow(row: any): Json {
   };
 }
 
+const ACCOUNT_FAILURE_CODES = new Set(["PARTIAL_ACCOUNTS_FAILED", "ALL_ACCOUNTS_FAILED"]);
+
+type CoverageLike = {
+  total?: number;
+  success?: number;
+  failed?: number;
+  newAccounts?: number;
+  running?: number;
+};
+
+/**
+ * A retry is stored as a child task with its own run, so the parent task and its
+ * first run keep the status of that first attempt. That leaves a task saying
+ * "partial_failed" forever after a retry fixes every account. Resolve the status
+ * from the latest result of each account instead, but only when the original
+ * failure was account-level: timeouts and script crashes keep their own status.
+ */
+function resolveTaskStatus(task: Json, coverage: CoverageLike): { status: string; runStatus: string | null } {
+  const status = String(task.status || "");
+  const runStatus = (task.runStatus as string | null) ?? null;
+
+  if (status !== "success" && status !== "failed") return { status, runStatus };
+
+  const accountFailure = runStatus === "partial_failed" || ACCOUNT_FAILURE_CODES.has(String(task.runErrorCode || ""));
+  if (!accountFailure) return { status, runStatus };
+
+  const total = Number(coverage.total || 0);
+  const success = Number(coverage.success || 0);
+  const failed = Number(coverage.failed || 0);
+  const running = Number(coverage.running || 0);
+  const newAccounts = Number(coverage.newAccounts || 0);
+
+  // Accounts that were never attempted say nothing about the outcome.
+  if (total - newAccounts <= 0) return { status, runStatus };
+  if (running > 0) return { status: "running", runStatus: "running" };
+  if (failed === 0) return { status: "success", runStatus: "success" };
+  if (success === 0) return { status: "failed", runStatus: "failed" };
+  return { status: "failed", runStatus: "partial_failed" };
+}
+
+function applyCoverage(task: Json, coverage: CoverageLike): Json {
+  task.successAccounts = Number(coverage.success || 0);
+  task.failedAccounts = Number(coverage.failed || 0);
+  task.newAccounts = Number(coverage.newAccounts || 0);
+  task.coverageTotal = Number(coverage.total || 0);
+  const resolved = resolveTaskStatus(task, coverage);
+  task.status = resolved.status;
+  task.runStatus = resolved.runStatus;
+  return task;
+}
+
 const taskSelect = `
   select t.id, t.platform_id, p.code as platform_code, p.name as platform_name,
          t.account_type, t.params, t.priority,
@@ -113,7 +165,7 @@ const taskSelect = `
          r.status as run_status, r.started_ts_ms, r.finished_ts_ms,
          r.total_accounts, r.success_accounts, r.failed_accounts,
          r.account_metric_count, r.content_metric_count, r.raw_record_count,
-         r.error_message, r.task_date_key, r.window_since_ts_ms, r.window_until_ts_ms,
+         r.error_message, r.error_code, r.task_date_key, r.window_since_ts_ms, r.window_until_ts_ms,
          (
            select count(*)::int
              from social_accounts a
@@ -198,20 +250,12 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   const pendingRows = await Promise.all(pendingResult.rows.map(async (row: any) => {
     const task = taskRow(row);
     const { coverage } = await loadTaskCoverage(pool, row);
-    task.successAccounts = coverage.success;
-    task.failedAccounts = coverage.failed;
-    task.newAccounts = coverage.newAccounts;
-    task.coverageTotal = coverage.total;
-    return task;
+    return applyCoverage(task, coverage);
   }));
   const executedRows = await Promise.all(executedResult.rows.map(async (row: any) => {
     const task = taskRow(row);
     const { coverage } = await loadTaskCoverage(pool, row);
-    task.successAccounts = coverage.success;
-    task.failedAccounts = coverage.failed;
-    task.newAccounts = coverage.newAccounts;
-    task.coverageTotal = coverage.total;
-    return task;
+    return applyCoverage(task, coverage);
   }));
   const pending = pendingRows;
   const executed = executedRows;
@@ -419,8 +463,8 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
   const taskResult = await pool.query(`${taskSelect} where t.id = $1`, [id]);
   if (!taskResult.rows.length) return null;
   const rawTask = taskResult.rows[0];
-  const task = taskRow(rawTask);
   const coverageData = await loadTaskCoverage(pool, rawTask);
+  const task = applyCoverage(taskRow(rawTask), coverageData.coverage);
 
   let run: Json | null = null;
   if (task.runId) {

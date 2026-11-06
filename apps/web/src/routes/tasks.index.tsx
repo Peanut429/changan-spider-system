@@ -15,7 +15,7 @@ import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
-import { platformColor } from '@/components/console/platform-color'
+import { PlatformMark } from '@/components/platform-mark'
 import { TaskDialog } from '@/components/task-dialog'
 import {
   AlertDialog,
@@ -212,12 +212,7 @@ function ViewTaskLink({ task, date }: { task: Task; date: string }) {
 }
 
 function PlatformCell({ task }: { task: Task }) {
-  return (
-    <span className="cx-plat">
-      <i style={{ color: platformColor(task.platformCode) }} aria-hidden="true" />
-      <span className="cx-cell-main">{task.platformName || task.platformCode}</span>
-    </span>
-  )
+  return <PlatformMark code={task.platformCode} name={task.platformName} />
 }
 
 function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; date: string; onDelete: (task: Task) => void; deletingId: string | null }) {
@@ -230,7 +225,7 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
           <th>账号类型</th>
           <th>周期（UTC+8）</th>
           <th>计划执行</th>
-          <th>运行</th>
+          <th className="cx-run-head">运行</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>
@@ -273,7 +268,7 @@ function ExecutedTable({ tasks, date }: { tasks: Task[]; date: string }) {
           <th className="cx-num">账号覆盖</th>
           <th className="cx-num">内容</th>
           <th data-hide-mobile="true">执行时段</th>
-          <th>运行</th>
+          <th className="cx-run-head">运行</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>

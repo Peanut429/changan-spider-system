@@ -36,10 +36,12 @@ const META: Record<StatusTone, { label: string; className: string; dot: string }
 }
 
 export function statusTone(status: string | null | undefined, runStatus?: string | null): StatusTone {
+  // A finished task that a retry has fully resolved reports success; its first
+  // run can still be partial_failed, so success must win over the stale run.
+  if (status === 'success') return 'success'
   if (runStatus === 'partial_failed') return 'partial'
   if (status === 'pending') return 'pending'
   if (status === 'running') return 'running'
-  if (status === 'success') return 'success'
   if (status === 'failed') return 'failed'
   if (status === 'cancelled') return 'cancelled'
   if (status === 'partial_failed') return 'partial'

@@ -30,6 +30,7 @@ export type Task = {
   runId: string | null
   lastError: string | null
   runStatus: string | null
+  runErrorCode: string | null
   runStartedAt: string | null
   runFinishedAt: string | null
   totalAccounts: number

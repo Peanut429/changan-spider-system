@@ -24,7 +24,7 @@ import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
-import { platformColor } from '@/components/console/platform-color'
+import { PlatformMark } from '@/components/platform-mark'
 import { StatusBadge } from '@/components/status-badge'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
@@ -454,7 +454,12 @@ function TaskDetailPage() {
       className="space-y-6"
     >
       <ConsoleBar
-        title={task.platformName}
+        title={
+          <span className="cx-plat-lockup">
+            <PlatformMark code={task.platformCode} name={task.platformName} size="lg" />
+            <span>任务详情</span>
+          </span>
+        }
         description="查看任务结果、账号数据和帖子数据。"
         actions={
           <div className="flex items-center gap-2">
@@ -484,10 +489,7 @@ function TaskDetailPage() {
         <CardContent className="p-0">
           <div className="flex flex-col gap-4 border-b border-border/70 bg-muted/25 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2.5">
-              <span className="cx-plat">
-                <i style={{ color: platformColor(task.platformCode) }} aria-hidden="true" />
-                <span>{task.platformName}</span>
-              </span>
+              <PlatformMark code={task.platformCode} name={task.platformName} size="sm" />
               <StatusBadge status={task.status} runStatus={task.runStatus} />
               <Badge variant="outline" className="font-normal">{task.accountType || '未设置账号类型'}</Badge>
             </div>
@@ -499,11 +501,11 @@ function TaskDetailPage() {
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="抓取范围（UTC+8）" value={formatWindow(task.windowSince, task.windowUntil)} />
             <Metric label="实际开始" value={formatFullDateTime(run?.startedAt ?? task.runStartedAt)} />
-            <Metric label="实际结束" value={run?.finishedAt ? formatFullDateTime(run.finishedAt) : task.status === 'running' ? '进行中' : '—'} />
+            <Metric label="实际结束" value={task.status === 'running' ? '进行中' : formatFullDateTime(run?.finishedAt ?? task.runFinishedAt)} />
             <Metric label="账号覆盖（成功/总数）" value={`${coverage.success} / ${coverage.total}`} />
           </div>
 
-          {run?.errorMessage || task.lastError ? (
+          {task.status === 'failed' && (run?.errorMessage || task.lastError) ? (
             <div className="cx-banner mx-4 mb-4 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs">
               <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span>{run?.errorMessage || task.lastError}</span>
@@ -564,7 +566,7 @@ function TaskDetailPage() {
             <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Card>
-                <CardHeader className="pb-3"><CardTitle className="text-sm">执行结果</CardTitle></CardHeader>
+                <CardHeader className="pb-3"><CardTitle className="text-sm">{childTasks.length ? '首次执行结果' : '执行结果'}</CardTitle></CardHeader>
                 <CardContent className="grid gap-2 text-xs">
                   <div className="flex justify-between"><span className="text-muted-foreground">执行状态</span><StatusBadge status={run.status} /></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">开始</span><span className="tabular-nums">{formatFullDateTime(run.startedAt)}</span></div>

@@ -19,7 +19,7 @@ import type { Account } from '@/lib/types'
 import { formatDateTime, formatNumber } from '@/lib/format'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
-import { platformColor } from '@/components/console/platform-color'
+import { PlatformMark } from '@/components/platform-mark'
 import { AccountDialog } from '@/components/account-dialog'
 import { ExcelImportPreview } from '@/components/excel-import-preview'
 import StarBorder from '@/components/StarBorder/StarBorder'
@@ -229,10 +229,7 @@ function AccountsPage() {
                       <div className="cx-cell-sub">{account.displayName || account.profileUrl}</div>
                     </td>
                     <td data-label="平台">
-                      <span className="cx-plat">
-                        <i style={{ color: platformColor(account.platformCode) }} aria-hidden="true" />
-                        <span>{account.platformName}</span>
-                      </span>
+                      <PlatformMark code={account.platformCode} name={account.platformName} />
                     </td>
                     <td data-label="类型">{account.accountType || '—'}</td>
                     <td data-label="状态">
