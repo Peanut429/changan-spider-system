@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { CalendarDays, Moon, Plus, RefreshCw, RotateCcw, Sun, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
@@ -10,6 +10,7 @@ import { zhCN } from 'date-fns/locale'
 import { deleteTask, getAccountTypes, getPlatforms, getTasks, retryTask } from '@/lib/api'
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
+import { useTheme } from '@/lib/theme'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
@@ -349,6 +350,7 @@ function TasksPage() {
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
   const reduceMotion = useReducedMotion()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   // The console page sits on its own phosphor screen instead of the app's paper.
   useEffect(() => {
@@ -395,17 +397,28 @@ function TasksPage() {
 
 
   const dateLabel = format(selectedDate, 'yyyy年M月d日 EEEE', { locale: zhCN })
+  const shortDateLabel = format(selectedDate, 'M月d日 EEE', { locale: zhCN })
 
   if (query.isPending) return <LoadingState />
 
   return (
     <div className="cx">
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-9"
+          aria-label={theme === 'dark' ? '切换到亮色' : '切换到暗色'}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" className="h-9 gap-2 px-2.5 font-normal">
               <CalendarDays className="size-4 text-muted-foreground" />
-              {dateLabel}
+              <span className="hidden sm:inline">{dateLabel}</span>
+              <span className="sm:hidden">{shortDateLabel}</span>
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="cx-portal w-auto p-0">
@@ -416,7 +429,7 @@ function TasksPage() {
           <RefreshCw className={query.isFetching ? 'size-4 animate-spin' : 'size-4'} />
         </Button>
         <Button
-          className="h-9 gap-1.5"
+          className="cx-primary h-9 gap-1.5"
           onClick={() => setCreateOpen(true)}
           disabled={!platformsQuery.data?.platforms.length || !accountTypesQuery.data?.accountTypes.length}
         >

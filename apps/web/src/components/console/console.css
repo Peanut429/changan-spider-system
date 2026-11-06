@@ -18,6 +18,62 @@
   --radius-lg: 6px;
   --radius-xl: 8px;
 
+  /* Light: an instrument on paper. */
+  --background: #f3f4f0;
+  --foreground: #131a16;
+  --card: #ffffff;
+  --card-foreground: #131a16;
+  --popover: #ffffff;
+  --popover-foreground: #131a16;
+  --primary: #0f7a55;
+  --primary-foreground: #ffffff;
+  --ring: rgba(15, 122, 85, 0.45);
+  --border: #dfe3dc;
+  --input: #cfd6cd;
+  --muted: #eef0ea;
+  --muted-foreground: #5b6960;
+  --secondary: #e9ede6;
+  --accent: #e6ebe3;
+
+  --cx-bg: #f3f4f0;
+  --cx-panel: #ffffff;
+  --cx-panel-2: #f7f8f5;
+  --cx-line: #e3e6df;
+  --cx-line-strong: #ccd3c9;
+
+  --cx-ink: #131a16;
+  --cx-ink-2: #56635b;
+  --cx-ink-3: #8a958d;
+
+  --cx-accent: #0f7a55;
+  --cx-warn: #9a6a12;
+  --cx-danger: #bf3626;
+
+  --cx-surface-bg: linear-gradient(180deg, rgba(15, 122, 85, 0.025), transparent 42%), #ffffff;
+  --cx-surface-shadow: 0 24px 44px -34px rgba(16, 24, 20, 0.45);
+  --cx-thead-bg: #ecefe9;
+  --cx-thead-ink: #56635b;
+  --cx-thead-line: #ccd3c9;
+  --cx-row-hover: rgba(15, 122, 85, 0.055);
+  --cx-mark-shadow: none;
+  --cx-cell-idle: rgba(15, 122, 85, 0.13);
+  --cx-cell-ok: linear-gradient(180deg, #17996a, #0d7a55);
+  --cx-cell-new: rgba(191, 54, 38, 0.4);
+  --cx-sweep-hi: rgba(15, 122, 85, 0.35);
+  --cx-sweep-lo: rgba(15, 122, 85, 0.08);
+
+  --cx-plat-linkedin: #0a66c2;
+  --cx-plat-instagram: #c13584;
+  --cx-plat-youtube: #cc3327;
+  --cx-plat-facebook: #1c74e8;
+  --cx-plat-x: #12161a;
+  --cx-plat-tiktok: #12161a;
+
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] .cx,
+:root[data-theme='dark'] .cx-portal {
   --background: #070b09;
   --foreground: #e6f5ec;
   --card: #0e1513;
@@ -45,9 +101,28 @@
   --cx-ink-3: #667a70;
 
   --cx-accent: #5ef2b0;
-  --cx-accent-soft: rgba(94, 242, 176, 0.12);
   --cx-warn: #ffb86b;
   --cx-danger: #ff6b5a;
+
+  --cx-surface-bg: linear-gradient(180deg, rgba(94, 242, 176, 0.03), transparent 42%), #0b1110;
+  --cx-surface-shadow: 0 50px 90px -60px rgba(0, 0, 0, 0.9);
+  --cx-thead-bg: rgba(0, 0, 0, 0.35);
+  --cx-thead-ink: #9db2a7;
+  --cx-thead-line: rgba(94, 242, 176, 0.16);
+  --cx-row-hover: rgba(94, 242, 176, 0.05);
+  --cx-mark-shadow: 0 0 8px currentColor;
+  --cx-cell-idle: rgba(94, 242, 176, 0.1);
+  --cx-cell-ok: linear-gradient(180deg, rgba(94, 242, 176, 0.9), rgba(94, 242, 176, 0.42));
+  --cx-cell-new: rgba(255, 184, 107, 0.55);
+  --cx-sweep-hi: rgba(94, 242, 176, 0.45);
+  --cx-sweep-lo: rgba(94, 242, 176, 0.1);
+
+  --cx-plat-linkedin: #4a9eff;
+  --cx-plat-instagram: #ff5fa2;
+  --cx-plat-youtube: #ff4d4d;
+  --cx-plat-facebook: #5b9cff;
+  --cx-plat-x: #e8f0ec;
+  --cx-plat-tiktok: #e8f0ec;
 
   color-scheme: dark;
 }
@@ -57,8 +132,6 @@
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  min-height: calc(100vh - 96px);
   color: var(--cx-ink);
   font-size: 14px;
 }
@@ -90,12 +163,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding-bottom: 22px;
+  padding-bottom: 18px;
 }
 
 .cx-title {
   margin: 0;
-  font-size: 32px;
+  font-size: 26px;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.025em;
@@ -176,10 +249,8 @@
   position: relative;
   border: 1px solid var(--cx-line);
   border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(94, 242, 176, 0.03), transparent 42%),
-    var(--cx-panel);
-  box-shadow: 0 50px 90px -60px rgba(0, 0, 0, 0.9);
+  background: var(--cx-surface-bg);
+  box-shadow: var(--cx-surface-shadow);
   overflow: hidden;
 }
 
@@ -195,8 +266,8 @@
   background: linear-gradient(
     180deg,
     transparent,
-    rgba(94, 242, 176, 0.1) 55%,
-    rgba(94, 242, 176, 0.45) 99%,
+    var(--cx-sweep-lo) 55%,
+    var(--cx-sweep-hi) 99%,
     transparent
   );
   animation: cx-sweep 900ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
@@ -228,9 +299,9 @@
 
 .cx-table thead th {
   padding: 11px 16px;
-  border-bottom: 1px solid rgba(94, 242, 176, 0.16);
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--cx-ink-2);
+  border-bottom: 1px solid var(--cx-thead-line);
+  background: var(--cx-thead-bg);
+  color: var(--cx-thead-ink);
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.06em;
@@ -254,7 +325,7 @@
 }
 
 .cx-row:hover {
-  background-color: rgba(94, 242, 176, 0.05);
+  background-color: var(--cx-row-hover);
 }
 
 .cx-table .cx-num {
@@ -283,7 +354,7 @@
   height: 24px;
   border-radius: 1px;
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  box-shadow: var(--cx-mark-shadow);
 }
 
 .cx-window {
@@ -350,11 +421,11 @@
   flex: 1 1 0;
   min-width: 1px;
   border-radius: 1px;
-  background: rgba(94, 242, 176, 0.1);
+  background: var(--cx-cell-idle);
 }
 
 .cx-cell[data-state='ok'] {
-  background: linear-gradient(180deg, rgba(94, 242, 176, 0.9), rgba(94, 242, 176, 0.42));
+  background: var(--cx-cell-ok);
 }
 
 .cx-cell[data-state='fail'] {
@@ -362,7 +433,7 @@
 }
 
 .cx-cell[data-state='new'] {
-  background: rgba(255, 184, 107, 0.55);
+  background: var(--cx-cell-new);
 }
 
 .cx-running {
@@ -380,7 +451,7 @@
   height: 5px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  box-shadow: var(--cx-mark-shadow);
   animation: cx-pulse 1.6s ease-in-out infinite;
 }
 
@@ -478,6 +549,11 @@
 
   .cx-actions {
     flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .cx-primary {
+    flex: 1 1 100%;
   }
 }
 
@@ -575,12 +651,24 @@
 /* The console page sits on the phosphor screen: kill the app-wide paper wash. */
 html.cx-page body {
   background:
+    radial-gradient(1100px 520px at 50% -14%, rgba(15, 122, 85, 0.07), transparent 62%),
+    linear-gradient(rgba(19, 26, 22, 0.035) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(90deg, rgba(19, 26, 22, 0.035) 1px, transparent 1px) 0 0 / 64px 100%,
+    #f3f4f0;
+}
+
+html.cx-page {
+  background: #f3f4f0;
+}
+
+:root[data-theme='dark'].cx-page body {
+  background:
     radial-gradient(1200px 600px at 50% -12%, rgba(94, 242, 176, 0.07), transparent 62%),
     linear-gradient(rgba(94, 242, 176, 0.02) 1px, transparent 1px) 0 0 / 100% 64px,
     linear-gradient(90deg, rgba(94, 242, 176, 0.02) 1px, transparent 1px) 0 0 / 64px 100%,
     #070b09;
 }
 
-html.cx-page {
+:root[data-theme='dark'].cx-page {
   background: #070b09;
 }
