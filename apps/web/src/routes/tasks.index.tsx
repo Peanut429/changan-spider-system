@@ -382,7 +382,7 @@ function TasksPage() {
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" className="h-9 gap-2 px-2.5 font-normal">
+            <Button variant="ghost" className="gap-2 font-normal">
               <CalendarDays className="size-4 text-muted-foreground" />
               <span className="hidden sm:inline">{dateLabel}</span>
               <span className="sm:hidden">{shortDateLabel}</span>
@@ -392,7 +392,7 @@ function TasksPage() {
             <Calendar mode="single" selected={selectedDate} onSelect={changeDate} locale={zhCN} />
           </PopoverContent>
         </Popover>
-        <Button variant="outline" size="icon" className="size-9" aria-label="刷新" onClick={refresh}>
+        <Button variant="outline" size="icon" aria-label="刷新" onClick={refresh}>
           <RefreshCw className={query.isFetching ? 'size-4 animate-spin' : 'size-4 transition-transform duration-300 group-hover/button:rotate-90'} />
         </Button>
         <StarBorder

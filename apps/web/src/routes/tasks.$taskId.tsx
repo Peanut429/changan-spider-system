@@ -391,10 +391,10 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
       {filtered.length > pageSize ? (
         <div className="flex items-center justify-end gap-2 pt-1">
           <span className="text-xs tabular-nums text-muted-foreground">第 {page} / {totalPages} 页</span>
-          <Button variant="outline" size="icon" className="size-8" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="帖子上一页">
+          <Button variant="outline" size="icon-sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="帖子上一页">
             <ChevronLeft className="size-4" />
           </Button>
-          <Button variant="outline" size="icon" className="size-8" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} aria-label="帖子下一页">
+          <Button variant="outline" size="icon-sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} aria-label="帖子下一页">
             <ChevronRight className="size-4" />
           </Button>
         </div>
@@ -460,8 +460,7 @@ function TaskDetailPage() {
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              size="sm"
-              className="gap-1.5 bg-card"
+              className="gap-1.5"
               onClick={() => {
                 void downloadTaskExcel({ task, accounts, contents })
                   .then(() => toast.success('Excel 已生成'))
@@ -471,7 +470,7 @@ function TaskDetailPage() {
               <Download className="size-3.5" />
               下载 Excel
             </Button>
-            <Button asChild variant="outline" size="sm" className="gap-1.5 bg-card">
+            <Button asChild variant="outline" className="gap-1.5">
               <Link to="/tasks" search={{ date: backDate }}>
                 <ArrowLeft className="size-3.5" />
                 返回任务列表

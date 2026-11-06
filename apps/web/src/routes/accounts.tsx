@@ -107,7 +107,7 @@ function AccountsPage() {
   return (
     <ConsolePage>
       <ConsoleBar title="账号管理" description="管理各平台账号和账号类型。">
-        <Button variant="outline" className="h-9 gap-1.5" onClick={() => setPreviewOpen(true)}>
+        <Button variant="outline" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
           <FileSpreadsheet className="size-4" />
           Excel 导入预览
         </Button>
