@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { CalendarDays, History, ListTodo, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
@@ -144,6 +144,20 @@ function Coverage({
       ) : null}
       <span className="sr-only">成功 {success} 个，共 {total} 个账号</span>
     </span>
+  )
+}
+
+function EmptyBlock({ icon: Icon, title, hint }: { icon: typeof ListTodo; title: string; hint: string }) {
+  return (
+    <div className="cx-empty">
+      <span className="cx-empty-icon">
+        <Icon className="size-4" strokeWidth={1.7} />
+      </span>
+      <div className="cx-empty-body">
+        <p className="cx-empty-title">{title}</p>
+        <p className="cx-empty-hint">{hint}</p>
+      </div>
+    </div>
   )
 }
 
@@ -440,28 +454,30 @@ function TasksPage() {
           <section className="cx-section">
             <div className="cx-section-head">
               <h2 className="cx-h2">待执行</h2>
-              {query.data.pending.length > 0 ? (
-                <span className="cx-count">{query.data.pending.length} 个批次</span>
-              ) : (
-                <p className="cx-note">今天没有待执行的批次</p>
-              )}
+              <span className="cx-count">{query.data.pending.length} 个批次</span>
             </div>
-            {query.data.pending.length > 0 ? (
-              <motion.div
-                key={`pending-${date}`}
-                className="cx-surface"
-                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={ROW_IN}
-              >
+            <motion.div
+              key={`pending-${date}`}
+              className="cx-surface"
+              initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={ROW_IN}
+            >
+              {query.data.pending.length > 0 ? (
                 <PendingTable
                   tasks={query.data.pending}
                   date={date}
                   onDelete={handleDelete}
                   deletingId={deletingId}
                 />
-              </motion.div>
-            ) : null}
+              ) : (
+                <EmptyBlock
+                  icon={ListTodo}
+                  title="今天没有待执行的批次"
+                  hint="创建任务后，它会按计划执行时间出现在这里。"
+                />
+              )}
+            </motion.div>
           </section>
 
           <section className="cx-section">
@@ -483,7 +499,11 @@ function TasksPage() {
               {query.data.executed.length > 0 ? (
                 <ExecutedTable tasks={query.data.executed} date={date} />
               ) : (
-                <p className="cx-empty-row">今天还没有执行记录。任务开始执行后会归到实际开始的那一天。</p>
+                <EmptyBlock
+                  icon={History}
+                  title="今天还没有执行记录"
+                  hint="任务开始执行后，会按实际开始时间归到对应日期。"
+                />
               )}
             </motion.div>
           </section>
