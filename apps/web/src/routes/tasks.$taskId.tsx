@@ -540,10 +540,11 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
-                glareOpacity={dark ? 0.18 : 0.22}
+                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
+                glareOpacity={dark ? 0.34 : 0.5}
                 blendMode={dark ? 'screen' : 'multiply'}
                 playOnce
+                softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
@@ -565,10 +566,11 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
-                glareOpacity={dark ? 0.18 : 0.22}
+                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
+                glareOpacity={dark ? 0.34 : 0.5}
                 blendMode={dark ? 'screen' : 'multiply'}
                 playOnce
+                softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
@@ -588,10 +590,11 @@ function TaskDetailPage() {
                 background="transparent"
                 borderColor="transparent"
                 borderRadius="10px"
-                glareColor={dark ? '#5ef2b0' : '#0f7a55'}
-                glareOpacity={dark ? 0.18 : 0.22}
+                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
+                glareOpacity={dark ? 0.34 : 0.5}
                 blendMode={dark ? 'screen' : 'multiply'}
                 playOnce
+                softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
               >
