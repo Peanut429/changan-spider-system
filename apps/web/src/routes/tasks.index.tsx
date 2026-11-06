@@ -71,6 +71,7 @@ function taskWindow(task: Task): string {
 
 function AccountCounts({ task }: { task: Task }) {
   const total = task.coverageTotal || task.plannedAccounts || task.totalAccounts
+  const processed = Math.max(0, total - (task.newAccounts || 0))
   return (
     <div className="space-y-0.5 text-xs tabular-nums">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -87,8 +88,8 @@ function AccountCounts({ task }: { task: Task }) {
       {task.newAccounts > 0 ? (
         <p className="text-[10px] text-sky-700">新增待补 {task.newAccounts}</p>
       ) : null}
-      {task.totalAccounts < total ? (
-        <p className="text-[10px] text-muted-foreground">已处理 {task.totalAccounts}</p>
+      {processed < total ? (
+        <p className="text-[10px] text-muted-foreground">已处理 {processed}</p>
       ) : null}
     </div>
   )
