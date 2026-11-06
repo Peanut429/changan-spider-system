@@ -27,6 +27,13 @@ const fullDateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   hour12: false,
 })
 
+const clockFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
 const fullDateFormatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone: TIME_ZONE,
   year: 'numeric',
@@ -59,6 +66,13 @@ export function formatFullDateTime(value: string | null | undefined): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
   return fullDateTimeFormatter.format(date)
+}
+
+export function formatClock(value: string | null | undefined): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return clockFormatter.format(date)
 }
 
 export function formatFullDate(value: string | null | undefined): string {
