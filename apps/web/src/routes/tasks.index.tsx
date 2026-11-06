@@ -1,15 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import {
-  CalendarDays,
-  CircleX,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Trash2,
-} from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { CalendarDays, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
@@ -17,12 +10,8 @@ import { deleteTask, getAccountTypes, getPlatforms, getTasks, retryTask } from '
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { ConsoleBar } from '@/components/console/console-bar'
-import { DayStrip, summariseDay } from '@/components/console/day-strip'
 import { platformColor } from '@/components/console/platform-color'
-import { StatusText } from '@/components/console/status-text'
-import { statusTone } from '@/components/status-badge'
 import { TaskDialog } from '@/components/task-dialog'
-import { EmptyState } from '@/components/empty-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,29 +48,37 @@ function taskWindow(task: Task): string {
   return '—'
 }
 
-const DAY_MINUTES = 24 * 60
-
-/** Where the run sits inside its own day, as percentages of a 24h track. */
-function dayPosition(task: Task): { left: number; width: number } | null {
-  if (!task.runStartedAt) return null
-  const start = new Date(task.runStartedAt)
-  if (Number.isNaN(start.getTime())) return null
-  const dayStart = new Date(start)
-  dayStart.setHours(0, 0, 0, 0)
-  const startMinutes = (start.getTime() - dayStart.getTime()) / 60_000
-  const end = task.runFinishedAt ? new Date(task.runFinishedAt) : null
-  const endMinutes = end && !Number.isNaN(end.getTime())
-    ? (end.getTime() - dayStart.getTime()) / 60_000
-    : startMinutes + 2
-  const left = Math.max(0, Math.min(99, (startMinutes / DAY_MINUTES) * 100))
-  const width = Math.max(2, Math.min(100 - left, ((endMinutes - startMinutes) / DAY_MINUTES) * 100))
-  return { left, width }
-}
-
 function taskRunClock(task: Task): string {
   if (!task.runStartedAt) return '—'
   if (!task.runFinishedAt) return `${formatClock(task.runStartedAt)} → 进行中`
   return `${formatClock(task.runStartedAt)} → ${formatClock(task.runFinishedAt)}`
+}
+
+function accountsOf(task: Task): number {
+  return task.coverageTotal || task.plannedAccounts || task.totalAccounts
+}
+
+/**
+ * The number the operator scans for: how many of the planned accounts came
+ * back. Gaps only appear when there are any, so a clean day stays quiet.
+ */
+function Coverage({ success, total, failed, pending }: { success: number; total: number; failed: number; pending: number }) {
+  return (
+    <span className="cx-cover">
+      <span className="cx-cover-num">
+        {formatNumber(success)}
+        <span>/{formatNumber(total)}</span>
+      </span>
+      {failed > 0 || pending > 0 ? (
+        <span className="cx-cover-note">
+          {failed > 0 ? <span data-tone="fail">失败 {failed}</span> : null}
+          {failed > 0 && pending > 0 ? ' · ' : null}
+          {pending > 0 ? <span>待补 {pending}</span> : null}
+        </span>
+      ) : null}
+      <span className="sr-only">成功 {success} 个，共 {total} 个账号</span>
+    </span>
+  )
 }
 
 function DeleteTaskButton({ task, onDelete, deleting }: { task: Task; onDelete: (task: Task) => void; deleting: boolean }) {
@@ -146,31 +143,35 @@ function ViewTaskLink({ task, date }: { task: Task; date: string }) {
   )
 }
 
+function PlatformCell({ task }: { task: Task }) {
+  return (
+    <span className="cx-plat">
+      <i style={{ background: platformColor(task.platformCode) }} aria-hidden="true" />
+      <span className="cx-cell-main">{task.platformName || task.platformCode}</span>
+      {task.status === 'running' ? <span className="cx-running">执行中</span> : null}
+    </span>
+  )
+}
+
 function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; date: string; onDelete: (task: Task) => void; deletingId: string | null }) {
   return (
     <table className="cx-table">
       <thead>
         <tr>
           <th>平台</th>
+          <th>账号类型</th>
+          <th>周期（UTC+8）</th>
           <th>计划执行</th>
-          <th data-hide-mobile="true">抓取范围（UTC+8）</th>
-          <th>状态</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>
       <tbody>
         {tasks.map((task) => (
           <tr key={task.id}>
-            <td data-block="true">
-              <span className="cx-plat">
-                <i style={{ background: platformColor(task.platformCode) }} aria-hidden="true" />
-                <span className="cx-cell-main">{task.platformName || task.platformCode}</span>
-              </span>
-              <div className="cx-cell-sub">{task.accountType || '未设置类型'}</div>
-            </td>
-            <td data-label="计划执行">{formatDateTime(task.scheduledAt)}</td>
-            <td data-label="抓取范围" data-hide-mobile="true"><span className="cx-window">{taskWindow(task)}</span></td>
-            <td data-label="状态"><StatusText status={task.status} runStatus={task.runStatus} /></td>
+            <td data-block="true"><PlatformCell task={task} /></td>
+            <td data-label="账号类型">{task.accountType || '—'}</td>
+            <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
+            <td data-label="计划执行"><span className="cx-window">{formatDateTime(task.scheduledAt)}</span></td>
             <td data-label="操作" className="cx-right">
               <div className="cx-row-actions">
                 <ViewTaskLink task={task} date={date} />
@@ -189,86 +190,51 @@ function ExecutedTable({
   date,
   onRetry,
   retryingId,
-  sharedWindow,
-  sharedAccountType,
 }: {
   tasks: Task[]
   date: string
   onRetry: (task: Task) => void
   retryingId: string | null
-  sharedWindow: string | null
-  sharedAccountType: string | null
 }) {
-  if (!tasks.length) {
-    return (
-      <EmptyState
-        icon={CircleX}
-        title="今天还没有执行记录"
-        description="任务开始执行后会按实际开始时间归到对应日期。"
-        className="border-0 bg-transparent py-10"
-      />
-    )
-  }
-
   return (
     <table className="cx-table">
       <thead>
         <tr>
           <th>平台</th>
-          {sharedWindow ? null : <th data-hide-mobile="true">抓取范围（UTC+8）</th>}
+          <th>账号类型</th>
+          <th>周期（UTC+8）</th>
           <th className="cx-num">账号</th>
           <th className="cx-num">内容</th>
           <th>执行时段</th>
-          <th>状态</th>
           <th className="cx-right">操作</th>
         </tr>
       </thead>
       <tbody>
-        {tasks.map((task) => {
-          const total = task.coverageTotal || task.plannedAccounts || task.totalAccounts
-          const position = dayPosition(task)
-          return (
-            <tr key={task.id} data-tone={statusTone(task.status, task.runStatus) === 'partial' ? 'warn' : task.status === 'failed' ? 'fail' : undefined}>
-              <td data-block="true">
-                <span className="cx-plat">
-                  <i style={{ background: platformColor(task.platformCode) }} aria-hidden="true" />
-                  <span className="cx-cell-main">{task.platformName || task.platformCode}</span>
-                </span>
-                {sharedAccountType ? null : <div className="cx-cell-sub">{task.accountType || '未设置类型'}</div>}
-              </td>
-              {sharedWindow ? null : (
-                <td data-label="抓取范围" data-hide-mobile="true"><span className="cx-window">{taskWindow(task)}</span></td>
-              )}
-              <td data-label="账号" className="cx-num">
-                <span className="cx-ratio">{task.successAccounts}<span>/{total}</span></span>
-                {task.failedAccounts > 0 ? <div className="cx-cell-sub" data-tone="fail">失败 {task.failedAccounts}</div> : null}
-              </td>
-              <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
-              <td data-label="执行时段">
-                <span className="cx-when">
-                  <span className="cx-when-track" aria-hidden="true">
-                    {position ? (
-                      <i
-                        data-fail={task.failedAccounts > 0 ? 'true' : undefined}
-                        style={{ left: `${position.left}%`, width: `${position.width}%` }}
-                      />
-                    ) : null}
-                  </span>
-                  <span className="cx-when-text">{taskRunClock(task)}</span>
-                </span>
-              </td>
-              <td data-label="状态"><StatusText status={task.status} runStatus={task.runStatus} /></td>
-              <td data-label="操作" className="cx-right">
-                <div className="cx-row-actions">
-                  <ViewTaskLink task={task} date={date} />
-                  {task.status === 'failed' ? (
-                    <RetryTaskButton task={task} onRetry={onRetry} retrying={retryingId === task.id} />
-                  ) : null}
-                </div>
-              </td>
-            </tr>
-          )
-        })}
+        {tasks.map((task) => (
+          <tr key={task.id}>
+            <td data-block="true"><PlatformCell task={task} /></td>
+            <td data-label="账号类型">{task.accountType || '—'}</td>
+            <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
+            <td data-label="账号" className="cx-num">
+              <Coverage
+                success={task.successAccounts}
+                total={accountsOf(task)}
+                failed={task.failedAccounts}
+                pending={task.newAccounts}
+              />
+            </td>
+            <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
+            <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
+            <td data-label="操作" className="cx-right">
+              <div className="cx-row-actions">
+                <ViewTaskLink task={task} date={date} />
+                {task.status === 'failed' ? (
+                  <RetryTaskButton task={task} onRetry={onRetry} retrying={retryingId === task.id} />
+                ) : null}
+              </div>
+            </td>
+          </tr>
+        ))}
       </tbody>
     </table>
   )
@@ -279,12 +245,11 @@ function LoadingState() {
     <div className="cx">
       <div className="cx-bar">
         <div>
-          <div className="cx-skel" style={{ width: 128, height: 26 }} />
-          <div className="cx-skel" style={{ width: 220, height: 13, marginTop: 10 }} />
+          <div className="cx-skel" style={{ width: 128, height: 28 }} />
+          <div className="cx-skel" style={{ width: 220, height: 13, marginTop: 12 }} />
         </div>
       </div>
-      <div className="cx-skel-day" />
-      <div className="cx-skel" style={{ height: 220, marginTop: 28, borderRadius: 8 }} />
+      <div className="cx-skel-table" />
     </div>
   )
 }
@@ -301,11 +266,6 @@ function TasksPage() {
   const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: getPlatforms })
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
-
-  useEffect(() => {
-    document.documentElement.classList.add('cx-page')
-    return () => document.documentElement.classList.remove('cx-page')
-  }, [])
 
   const handleRetry = async (task: Task) => {
     setRetryingId(task.id)
@@ -340,16 +300,6 @@ function TasksPage() {
   }
 
   const dateLabel = format(selectedDate, 'yyyy年M月d日 EEEE', { locale: zhCN })
-  const day = useMemo(() => summariseDay(query.data?.executed ?? []), [query.data?.executed])
-  // Columns that would repeat the same value in every row move up to the header.
-  const sharedWindow = useMemo(() => {
-    const values = new Set((query.data?.executed ?? []).map(taskWindow))
-    return values.size === 1 ? [...values][0] : null
-  }, [query.data?.executed])
-  const sharedAccountType = useMemo(() => {
-    const values = new Set((query.data?.executed ?? []).map((task) => task.accountType || '未设置类型'))
-    return values.size === 1 ? [...values][0] : null
-  }, [query.data?.executed])
 
   if (query.isPending) return <LoadingState />
 
@@ -393,8 +343,6 @@ function TasksPage() {
         </div>
       ) : null}
 
-      {query.data && day.batches > 0 ? <DayStrip summary={day} /> : null}
-
       {query.data ? (
         <>
           <section className="cx-section">
@@ -422,18 +370,18 @@ function TasksPage() {
             <div className="cx-section-head">
               <h2 className="cx-h2">执行记录</h2>
               <span className="cx-count">{query.data.executed.length} 个批次</span>
-              {sharedAccountType ? <span className="cx-count">· {sharedAccountType}</span> : null}
-              {sharedWindow ? <span className="cx-count">· {sharedWindow}（UTC+8）</span> : null}
             </div>
             <div className="cx-surface">
-              <ExecutedTable
-                tasks={query.data.executed}
-                date={date}
-                onRetry={handleRetry}
-                retryingId={retryingId}
-                sharedWindow={sharedWindow}
-                sharedAccountType={sharedAccountType}
-              />
+              {query.data.executed.length > 0 ? (
+                <ExecutedTable
+                  tasks={query.data.executed}
+                  date={date}
+                  onRetry={handleRetry}
+                  retryingId={retryingId}
+                />
+              ) : (
+                <p className="cx-empty-row">今天还没有执行记录。任务开始执行后会归到实际开始的那一天。</p>
+              )}
             </div>
           </section>
         </>

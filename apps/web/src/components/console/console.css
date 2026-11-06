@@ -1,9 +1,10 @@
 /*
  * Console template — scoped to `.cx`.
  *
- * One dark measure at the top (the whole day in a single gauge), then paper,
- * hairlines and tabular numerals. Tokens are redeclared on `.cx` so the rest of
- * the app keeps the current theme until this page is signed off.
+ * The table is the page. Columns are ordered by what an operator actually
+ * checks: which account type ran, over which window, and how many of its
+ * accounts came back. Tokens are redeclared on `.cx` so the rest of the app
+ * keeps the current theme until this page is signed off.
  */
 
 .cx {
@@ -28,14 +29,11 @@
   --cx-ink-2: #575c52;
   --cx-ink-3: #83887c;
   --cx-rule: #e3e1d7;
-  --cx-rule-strong: #cfcdc1;
 
   --cx-panel: #171b16;
   --cx-panel-ink: #eef0e8;
-  --cx-panel-muted: #949a8f;
 
   --cx-ok: #4a6b57;
-  --cx-warn: #966819;
   --cx-fail: #c2452c;
 
   color: var(--cx-ink);
@@ -49,12 +47,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding-bottom: 20px;
+  padding-bottom: 22px;
 }
 
 .cx-title {
   margin: 0;
-  font-size: 26px;
+  font-size: 27px;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.025em;
@@ -74,92 +72,6 @@
   gap: 8px;
 }
 
-/* ---------- day strip ---------- */
-
-.cx-day {
-  padding: 20px 22px 18px;
-  border-radius: 8px;
-  background: var(--cx-panel);
-  color: var(--cx-panel-ink);
-}
-
-.cx-day-stats {
-  display: flex;
-  align-items: flex-end;
-  gap: 56px;
-}
-
-.cx-day-stat {
-  min-width: 0;
-}
-
-.cx-day-value {
-  margin: 0;
-  font-size: 36px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
-}
-
-.cx-day-label {
-  margin: 7px 0 0;
-  font-size: 12px;
-  color: var(--cx-panel-muted);
-  white-space: nowrap;
-}
-
-.cx-day-stat[data-alert='true'] .cx-day-value {
-  color: #f0a48f;
-}
-
-.cx-day-stat[data-alert='true'] .cx-day-label {
-  color: #eda694;
-}
-
-.cx-day-meter {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.cx-day-gauge {
-  display: flex;
-  gap: 1px;
-  align-items: stretch;
-  flex: 1 1 auto;
-  height: 7px;
-  min-width: 0;
-}
-
-.cx-day-tick {
-  flex: 1 1 0;
-  min-width: 0;
-  border-radius: 0;
-  background: rgba(238, 240, 232, 0.2);
-}
-
-.cx-day-tick[data-state='ok'] {
-  background: rgba(238, 240, 232, 0.62);
-}
-
-.cx-day-tick[data-state='fail'] {
-  background: #e5593c;
-}
-
-.cx-day-tick[data-state='new'] {
-  background: rgba(229, 89, 60, 0.45);
-}
-
-.cx-day-meter-label {
-  margin: 0;
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--cx-panel-muted);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------- sections ---------- */
 
 .cx-section {
@@ -170,8 +82,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
-  padding-bottom: 9px;
+  gap: 4px 12px;
+  padding-bottom: 10px;
 }
 
 .cx-h2 {
@@ -189,11 +101,26 @@
   color: var(--cx-ink-3);
 }
 
+.cx-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cx-ink-3);
+}
+
+.cx-empty-row {
+  margin: 0;
+  padding: 26px 16px;
+  font-size: 13px;
+  color: var(--cx-ink-3);
+}
+
 .cx-surface {
   border-radius: 8px;
   background: var(--cx-surface);
   overflow: hidden;
 }
+
+/* ---------- table ---------- */
 
 .cx-table {
   width: 100%;
@@ -202,19 +129,18 @@
   font-variant-numeric: tabular-nums;
 }
 
-.cx-table th {
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--cx-rule-strong);
-  background: rgba(23, 26, 21, 0.022);
+.cx-table thead th {
+  padding: 11px 16px;
+  background: var(--cx-panel);
+  color: rgba(238, 240, 232, 0.62);
   font-size: 12px;
   font-weight: 500;
-  color: var(--cx-ink-3);
   text-align: left;
   white-space: nowrap;
 }
 
 .cx-table td {
-  padding: 12px 14px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--cx-rule);
   vertical-align: middle;
   color: var(--cx-ink);
@@ -222,14 +148,6 @@
 
 .cx-table tbody tr:last-child td {
   border-bottom: 0;
-}
-
-.cx-table tbody tr[data-tone='warn'] td:first-child {
-  box-shadow: inset 2px 0 0 var(--cx-warn);
-}
-
-.cx-table tbody tr[data-tone='fail'] td:first-child {
-  box-shadow: inset 2px 0 0 var(--cx-fail);
 }
 
 .cx-table tbody tr:hover {
@@ -249,16 +167,6 @@
   font-weight: 500;
 }
 
-.cx-cell-sub {
-  margin-top: 3px;
-  font-size: 12px;
-  color: var(--cx-ink-3);
-}
-
-.cx-cell-sub[data-tone='fail'] {
-  color: var(--cx-fail);
-}
-
 .cx-plat {
   display: inline-flex;
   align-items: center;
@@ -272,72 +180,67 @@
   border-radius: 2px;
 }
 
-.cx-ratio {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.cx-ratio span {
-  font-weight: 400;
-  color: var(--cx-ink-3);
-}
-
 .cx-window {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--cx-ink-2);
   white-space: nowrap;
 }
 
 .cx-when {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.cx-when-track {
-  position: relative;
-  flex: 0 0 auto;
-  width: 72px;
-  height: 7px;
-  border-radius: 1px;
-  background-color: rgba(23, 26, 21, 0.06);
-  /* quarter-day marks, so a run's position reads against 00/06/12/18 */
-  background-image: repeating-linear-gradient(
-    to right,
-    rgba(23, 26, 21, 0.09) 0 1px,
-    transparent 1px 25%
-  );
-  overflow: hidden;
-}
-
-.cx-when-track i {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: 1px;
-  background: rgba(23, 26, 21, 0.58);
-}
-
-.cx-when-track i[data-fail='true'] {
-  background: var(--cx-fail);
-}
-
-.cx-when-text {
   font-size: 12px;
-  color: var(--cx-ink-2);
+  color: var(--cx-ink-3);
   white-space: nowrap;
 }
 
-.cx-note {
-  margin: 0;
-  font-size: 13px;
-  color: var(--cx-ink-2);
+/* ---------- coverage cell ---------- */
+
+.cx-cover {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
-.cx-section-head .cx-note {
-  margin-left: 4px;
+.cx-cover-num {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.cx-cover-num span {
+  font-weight: 400;
   color: var(--cx-ink-3);
 }
+
+.cx-cover-note {
+  font-size: 12px;
+  color: var(--cx-ink-3);
+  white-space: nowrap;
+}
+
+.cx-cover-note [data-tone='fail'] {
+  color: var(--cx-fail);
+}
+
+.cx-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--cx-ink-3);
+}
+
+.cx-running::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+/* ---------- row actions ---------- */
 
 .cx-row-actions {
   display: flex;
@@ -374,31 +277,6 @@
   color: var(--cx-ink-2);
 }
 
-/* ---------- inline status ---------- */
-
-.cx-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  white-space: nowrap;
-  color: var(--cx-ink-2);
-}
-
-.cx-status::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
-.cx-status[data-tone='ok'] { color: var(--cx-ok); }
-.cx-status[data-tone='warn'] { color: var(--cx-warn); }
-.cx-status[data-tone='fail'] { color: var(--cx-fail); }
-.cx-status[data-tone='running'] { color: #2f6f8f; }
-.cx-status[data-tone='idle'] { color: var(--cx-ink-3); }
-
 /* ---------- error / loading ---------- */
 
 .cx-error {
@@ -423,23 +301,13 @@
   background: rgba(23, 26, 21, 0.06);
 }
 
-.cx-skel-day {
-  height: 116px;
+.cx-skel-table {
+  height: 320px;
   border-radius: 8px;
-  background: rgba(23, 26, 21, 0.08);
+  background: rgba(23, 26, 21, 0.05);
 }
 
 /* ---------- responsive ---------- */
-
-@media (max-width: 720px) {
-  .cx-day-stats {
-    gap: 28px;
-  }
-
-  .cx-day-value {
-    font-size: 24px;
-  }
-}
 
 @media (max-width: 860px) {
   .cx-bar {
@@ -473,7 +341,7 @@
 
   .cx-table tr {
     margin-bottom: 8px;
-    padding: 8px 0;
+    padding: 10px 0;
     border: 1px solid var(--cx-rule);
     border-radius: 8px;
     background: var(--cx-surface);
@@ -481,10 +349,10 @@
 
   .cx-table td {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 4px 12px;
+    padding: 4px 14px;
     border-bottom: 0;
     text-align: right;
   }
@@ -501,22 +369,18 @@
     text-align: left;
   }
 
-  .cx-table td[data-label='']::before {
-    content: none;
-  }
-
-  .cx-table .cx-num,
-  .cx-table .cx-right {
-    text-align: right;
-  }
-
   .cx-table td[data-block='true'] {
     display: block;
+    padding-bottom: 8px;
     text-align: left;
   }
 
   .cx-table td[data-block='true']::before {
     content: none;
+  }
+
+  .cx-plat {
+    font-size: 15px;
   }
 }
 
