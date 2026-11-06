@@ -104,43 +104,10 @@ function accountsOf(task: Task): number {
 }
 
 /**
- * Every planned account becomes one cell, in order. The array is the point of
- * the page: you can see coverage as hardware rather than read it off a number.
+ * Solid coverage bar: success, failed and still-pending slices laid end to end
+ * over a track. One element per slice instead of one per account, so the widths
+ * stay exact at any count.
  */
-function CoverageArray({ success, failed, pending, total }: { success: number; failed: number; pending: number; total: number }) {
-  if (total <= 0) {
-    return <span className="cx-cells" aria-hidden="true" />
-  }
-
-  if (total > 220) {
-    const pct = (value: number) => `${(value / total) * 100}%`
-    return (
-      <span className="cx-cells" aria-hidden="true">
-        <span className="cx-cell" data-state="ok" style={{ flex: `0 0 ${pct(success)}`, animationDelay: '0ms' }} />
-        {failed > 0 ? <span className="cx-cell" data-state="fail" style={{ flex: `0 0 ${pct(failed)}`, animationDelay: '40ms' }} /> : null}
-        {pending > 0 ? <span className="cx-cell" data-state="new" style={{ flex: `0 0 ${pct(pending)}`, animationDelay: '80ms' }} /> : null}
-        <span className="cx-cell" data-state="idle" style={{ flex: '1 1 0', animationDelay: '120ms' }} />
-      </span>
-    )
-  }
-
-  return (
-    <span className="cx-cells" aria-hidden="true">
-      {Array.from({ length: total }, (_, index) => {
-        const state =
-          index < success
-            ? 'ok'
-            : index < success + failed
-              ? 'fail'
-              : index < success + failed + pending
-                ? 'new'
-                : 'idle'
-        return <span key={index} className="cx-cell" data-state={state} />
-      })}
-    </span>
-  )
-}
-
 function Coverage({
   success,
   total,
@@ -152,13 +119,22 @@ function Coverage({
   failed: number
   pending: number
 }) {
+  const denominator = Math.max(total, 1)
+  const okWidth = Math.min(100, (success / denominator) * 100)
+  const failWidth = Math.min(100 - okWidth, (failed / denominator) * 100)
+  const pendingWidth = Math.min(100 - okWidth - failWidth, (pending / denominator) * 100)
+
   return (
     <span className="cx-cover">
       <span className="cx-cover-num">
         <AnimatedNumber value={success} />
         <span>/{formatNumber(total)}</span>
       </span>
-      <CoverageArray success={success} total={total} failed={failed} pending={pending} />
+      <span className="cx-cover-bar" aria-hidden="true">
+        <i data-state="ok" style={{ width: `${okWidth}%` }} />
+        {failWidth > 0 ? <i data-state="fail" style={{ width: `${failWidth}%` }} /> : null}
+        {pendingWidth > 0 ? <i data-state="new" style={{ width: `${pendingWidth}%` }} /> : null}
+      </span>
       {failed > 0 || pending > 0 ? (
         <span className="cx-cover-note">
           {failed > 0 ? <span data-tone="fail">失败 {failed}</span> : null}

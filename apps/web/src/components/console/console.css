@@ -330,7 +330,7 @@
   background-color: var(--cx-row-hover);
 }
 
-.cx-row:hover .cx-cells {
+.cx-row:hover .cx-cover-bar {
   filter: saturate(1.25) brightness(1.1);
 }
 
@@ -415,40 +415,39 @@
   color: var(--cx-danger);
 }
 
-.cx-cells {
+.cx-cover-bar {
   display: flex;
-  transition: filter 200ms ease-out;
-  gap: 2px;
   width: 100%;
   min-width: 120px;
-  height: 30px;
+  height: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--cx-cell-idle);
   transform-origin: left center;
   animation: cx-fill 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cx-cover-bar i {
+  display: block;
+  height: 100%;
+}
+
+.cx-cover-bar i[data-state='ok'] {
+  background: var(--cx-cell-ok);
+}
+
+.cx-cover-bar i[data-state='fail'] {
+  background: var(--cx-danger);
+}
+
+.cx-cover-bar i[data-state='new'] {
+  background: var(--cx-cell-new);
 }
 
 /* One composited transform per row instead of 50–90 per cell. */
 @keyframes cx-fill {
   from { transform: scaleX(0.02); opacity: 0.2; }
   to { transform: none; opacity: 1; }
-}
-
-.cx-cell {
-  flex: 1 1 0;
-  min-width: 1px;
-  border-radius: 1px;
-  background: var(--cx-cell-idle);
-}
-
-.cx-cell[data-state='ok'] {
-  background: var(--cx-cell-ok);
-}
-
-.cx-cell[data-state='fail'] {
-  background: var(--cx-danger);
-}
-
-.cx-cell[data-state='new'] {
-  background: var(--cx-cell-new);
 }
 
 .cx-run {
