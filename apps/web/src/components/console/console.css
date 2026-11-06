@@ -1,9 +1,9 @@
 /*
  * Console template — scoped to `.cx`.
  *
- * Direction: the batch rail is the one loud element; everything under it is
- * paper, hairlines and tabular numerals. Tokens are redeclared on `.cx` so the
- * rest of the app keeps the current theme until this page is signed off.
+ * One dark measure at the top (the whole day in a single gauge), then paper,
+ * hairlines and tabular numerals. Tokens are redeclared on `.cx` so the rest of
+ * the app keeps the current theme until this page is signed off.
  */
 
 .cx {
@@ -23,7 +23,6 @@
   --secondary: #eceae0;
   --accent: #eceae0;
 
-  --cx-paper: #f7f5ef;
   --cx-surface: #ffffff;
   --cx-ink: #171a15;
   --cx-ink-2: #575c52;
@@ -32,7 +31,6 @@
   --cx-rule-strong: #cfcdc1;
 
   --cx-panel: #171b16;
-  --cx-panel-rule: #2c322a;
   --cx-panel-ink: #eef0e8;
   --cx-panel-muted: #949a8f;
 
@@ -56,14 +54,14 @@
 
 .cx-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 600;
   line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 .cx-sub {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   font-size: 13px;
   line-height: 1.5;
   color: var(--cx-ink-2);
@@ -76,192 +74,116 @@
   gap: 8px;
 }
 
-/* ---------- batch rail ---------- */
+/* ---------- day strip ---------- */
 
-.cx-rail {
-  padding: 14px 18px 10px;
+.cx-day {
+  padding: 20px 22px 18px;
   border-radius: 8px;
   background: var(--cx-panel);
   color: var(--cx-panel-ink);
 }
 
-.cx-rail-head {
+.cx-day-stats {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 11px;
-  border-bottom: 1px solid var(--cx-panel-rule);
-  font-size: 13px;
+  align-items: flex-end;
+  gap: 56px;
 }
 
-.cx-rail-sum {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  color: var(--cx-panel-muted);
-}
-
-.cx-rail-sum strong {
-  font-weight: 600;
-  color: var(--cx-panel-ink);
-}
-
-.cx-rail-flag {
-  margin: 0;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: #eda694;
-}
-
-.cx-rail-head-row,
-.cx-lane-link {
-  display: grid;
-  grid-template-columns: 116px minmax(0, 1fr) 62px 76px 124px 84px;
-  align-items: center;
-  gap: 16px;
-}
-
-.cx-rail-head-row {
-  padding: 7px 0 3px;
-  font-size: 12px;
-  color: var(--cx-panel-muted);
-}
-
-.cx-rail-head-row > :nth-child(3),
-.cx-rail-head-row > :nth-child(4) {
-  text-align: right;
-}
-
-.cx-lanes {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cx-lane + .cx-lane .cx-lane-link {
-  border-top: 1px solid var(--cx-panel-rule);
-}
-
-.cx-lane-link {
-  padding: 10px 0;
-  color: inherit;
-  text-decoration: none;
-  border-radius: 4px;
-}
-
-.cx-lane-link:hover {
-  background: rgba(238, 240, 232, 0.04);
-}
-
-.cx-lane-link:focus-visible {
-  outline: 2px solid #a8b3a4;
-  outline-offset: 3px;
-}
-
-.cx-lane-name {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cx-lane-bar {
-  display: flex;
-  gap: 2px;
-  align-items: stretch;
-  height: 12px;
+.cx-day-stat {
   min-width: 0;
 }
 
-.cx-tick {
-  flex: 1 1 0;
-  min-width: 1px;
-  border-radius: 1px;
-  background: rgba(238, 240, 232, 0.1);
-}
-
-.cx-tick[data-state='ok'] {
-  background: rgba(238, 240, 232, 0.3);
-}
-
-.cx-tick[data-state='fail'] {
-  background: var(--cx-fail);
-}
-
-.cx-tick[data-state='new'] {
-  background: rgba(194, 69, 44, 0.38);
-}
-
-.cx-tick[data-state='idle'] {
-  background: rgba(238, 240, 232, 0.1);
-}
-
-.cx-lane-bar[data-dense='true'] {
-  gap: 0;
-}
-
-.cx-lane-num {
-  font-size: 13px;
+.cx-day-value {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  color: var(--cx-panel-ink);
 }
 
-.cx-lane-sub,
-.cx-lane-time {
+.cx-day-label {
+  margin: 7px 0 0;
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
   color: var(--cx-panel-muted);
   white-space: nowrap;
 }
 
-.cx-lane-sub {
-  text-align: right;
+.cx-day-stat[data-alert='true'] .cx-day-value {
+  color: #f0a48f;
 }
 
-.cx-state {
-  display: inline-flex;
+.cx-day-stat[data-alert='true'] .cx-day-label {
+  color: #eda694;
+}
+
+.cx-day-meter {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.cx-day-gauge {
+  display: flex;
+  gap: 1px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  height: 7px;
+  min-width: 0;
+}
+
+.cx-day-tick {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0;
+  background: rgba(238, 240, 232, 0.2);
+}
+
+.cx-day-tick[data-state='ok'] {
+  background: rgba(238, 240, 232, 0.62);
+}
+
+.cx-day-tick[data-state='fail'] {
+  background: #e5593c;
+}
+
+.cx-day-tick[data-state='new'] {
+  background: rgba(229, 89, 60, 0.45);
+}
+
+.cx-day-meter-label {
+  margin: 0;
+  flex: 0 0 auto;
   font-size: 12px;
-  white-space: nowrap;
+  color: var(--cx-panel-muted);
+  font-variant-numeric: tabular-nums;
 }
-
-.cx-state::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
-.cx-state[data-tone='ok'] { color: #9fb5a4; }
-.cx-state[data-tone='warn'] { color: #e0a86a; }
-.cx-state[data-tone='fail'] { color: #f08a72; }
-.cx-state[data-tone='running'] { color: #8fbdd4; }
 
 /* ---------- sections ---------- */
 
 .cx-section {
-  margin-top: 28px;
+  margin-top: 26px;
 }
 
 .cx-section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
+  gap: 4px 10px;
   padding-bottom: 9px;
 }
 
 .cx-h2 {
   margin: 0;
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .cx-count {
+  white-space: nowrap;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--cx-ink-3);
@@ -283,6 +205,7 @@
 .cx-table th {
   padding: 9px 14px;
   border-bottom: 1px solid var(--cx-rule-strong);
+  background: rgba(23, 26, 21, 0.022);
   font-size: 12px;
   font-weight: 500;
   color: var(--cx-ink-3);
@@ -291,7 +214,7 @@
 }
 
 .cx-table td {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--cx-rule);
   vertical-align: middle;
   color: var(--cx-ink);
@@ -301,13 +224,20 @@
   border-bottom: 0;
 }
 
+.cx-table tbody tr[data-tone='warn'] td:first-child {
+  box-shadow: inset 2px 0 0 var(--cx-warn);
+}
+
+.cx-table tbody tr[data-tone='fail'] td:first-child {
+  box-shadow: inset 2px 0 0 var(--cx-fail);
+}
+
 .cx-table tbody tr:hover {
   background: rgba(23, 26, 21, 0.022);
 }
 
 .cx-table .cx-num {
   text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .cx-table .cx-right {
@@ -315,12 +245,12 @@
 }
 
 .cx-cell-main {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 500;
 }
 
 .cx-cell-sub {
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: 12px;
   color: var(--cx-ink-3);
 }
@@ -329,26 +259,73 @@
   color: var(--cx-fail);
 }
 
+.cx-plat {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.cx-plat i {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.cx-ratio {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.cx-ratio span {
+  font-weight: 400;
+  color: var(--cx-ink-3);
+}
+
 .cx-window {
   font-size: 12px;
   color: var(--cx-ink-2);
   white-space: nowrap;
 }
 
-.cx-window span {
-  color: var(--cx-ink-3);
+.cx-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
 }
 
-.cx-dim {
+.cx-when-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 72px;
+  height: 7px;
+  border-radius: 1px;
+  background-color: rgba(23, 26, 21, 0.06);
+  /* quarter-day marks, so a run's position reads against 00/06/12/18 */
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(23, 26, 21, 0.09) 0 1px,
+    transparent 1px 25%
+  );
+  overflow: hidden;
+}
+
+.cx-when-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 1px;
+  background: rgba(23, 26, 21, 0.58);
+}
+
+.cx-when-track i[data-fail='true'] {
+  background: var(--cx-fail);
+}
+
+.cx-when-text {
   font-size: 12px;
-  color: var(--cx-ink-3);
-}
-
-.cx-empty {
-  margin: 0;
-  padding: 18px 14px;
-  font-size: 13px;
   color: var(--cx-ink-2);
+  white-space: nowrap;
 }
 
 .cx-note {
@@ -357,26 +334,9 @@
   color: var(--cx-ink-2);
 }
 
-.cx-inline-action {
-  margin-left: 6px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: var(--cx-ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.cx-inline-action:hover {
-  text-decoration-thickness: 2px;
-}
-
-.cx-empty a {
-  color: var(--cx-ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.cx-section-head .cx-note {
+  margin-left: 4px;
+  color: var(--cx-ink-3);
 }
 
 .cx-row-actions {
@@ -439,7 +399,7 @@
 .cx-status[data-tone='running'] { color: #2f6f8f; }
 .cx-status[data-tone='idle'] { color: var(--cx-ink-3); }
 
-/* ---------- error ---------- */
+/* ---------- error / loading ---------- */
 
 .cx-error {
   display: flex;
@@ -458,31 +418,26 @@
   margin: 0;
 }
 
-/* ---------- loading ---------- */
-
 .cx-skel {
   border-radius: 6px;
   background: rgba(23, 26, 21, 0.06);
 }
 
-.cx-skel-rail {
-  height: 196px;
+.cx-skel-day {
+  height: 116px;
   border-radius: 8px;
   background: rgba(23, 26, 21, 0.08);
 }
 
 /* ---------- responsive ---------- */
 
-@media (max-width: 1100px) {
-  .cx-rail-head-row,
-  .cx-lane-link {
-    grid-template-columns: 104px minmax(0, 1fr) 58px 116px 82px;
-    gap: 12px;
+@media (max-width: 720px) {
+  .cx-day-stats {
+    gap: 28px;
   }
 
-  .cx-lane-sub,
-  .cx-rail-head-row .cx-col-sub {
-    display: none;
+  .cx-day-value {
+    font-size: 24px;
   }
 }
 
@@ -495,31 +450,6 @@
   .cx-actions {
     flex-wrap: wrap;
   }
-
-  .cx-rail-head {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .cx-rail-head-row {
-    display: none;
-  }
-
-  .cx-lane-link {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      'name state'
-      'bar bar'
-      'num time';
-    row-gap: 7px;
-    padding: 12px 0;
-  }
-
-  .cx-lane-name { grid-area: name; }
-  .cx-lane-bar { grid-area: bar; height: 10px; }
-  .cx-lane-num { grid-area: num; text-align: left; color: var(--cx-panel-muted); }
-  .cx-lane-time { grid-area: time; text-align: right; }
-  .cx-state { grid-area: state; justify-self: end; }
 }
 
 @media (max-width: 720px) {
