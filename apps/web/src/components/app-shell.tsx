@@ -163,17 +163,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="min-w-0">
         <div className="sticky top-0 z-30 lg:hidden">
-          <header className="flex items-center justify-between border-b border-border/70 bg-background/85 px-4 py-3 backdrop-blur-xl">
+          <header className="flex items-center justify-between border-b border-sidebar-border/60 bg-sidebar/95 px-4 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-2.5">
               <BrandMark />
               <div>
-                <p className="text-[11px] leading-none text-muted-foreground">长安汽车 · 海外数据</p>
-                <p className="mt-1 text-[13px] font-semibold leading-none">RPA Console</p>
+                <p className="text-[11px] leading-none text-sidebar-foreground/55">长安汽车 · 海外数据</p>
+                <p className="mt-1 text-[13px] font-semibold leading-none text-sidebar-foreground">RPA Console</p>
               </div>
             </div>
           </header>
 
-          <div className="flex gap-1 overflow-x-auto border-b border-border/70 bg-background/85 px-3 py-2 backdrop-blur-xl">
+          <div className="flex gap-1 overflow-x-auto border-b border-sidebar-border/60 bg-sidebar/95 px-3 py-2 backdrop-blur-xl">
             {NAV_ITEMS.map((item) => {
               const active = pathname === item.to || pathname.startsWith(`${item.to}/`)
               const Icon = item.icon
@@ -183,7 +183,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   to={item.to}
                   className={cn(
                     'flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                    active ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted',
+                    active ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground/65 hover:bg-white/6',
                   )}
                 >
                   <Icon className="size-3.5" />

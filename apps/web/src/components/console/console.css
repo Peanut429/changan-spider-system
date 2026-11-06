@@ -1,16 +1,15 @@
 /*
  * Console template — scoped to `.cx`.
  *
- * The table is the page. Columns are ordered by what an operator actually
- * checks: which account type ran, over which window, and how many of its
- * accounts came back. Tokens are redeclared on `.cx` so the rest of the app
- * keeps the current theme until this page is signed off.
+ * Direction: a cockpit instrument panel. Near-black phosphor screen, one mint
+ * accent, data drawn as hardware (segmented coverage arrays, tick rulers),
+ * interaction that answers the pointer. Everything glowing is a value; nothing
+ * glows for decoration.
+ *
+ * Tokens are redeclared on `.cx` so the rest of the app keeps its theme until
+ * this page is signed off. `.cx-portal` carries them onto portaled surfaces.
  */
 
-/*
- * `.cx` scopes the page; `.cx-portal` carries the same tokens onto portaled
- * surfaces (dialogs, popovers, alerts) that render outside the page tree.
- */
 .cx,
 .cx-portal {
   --radius: 6px;
@@ -19,27 +18,38 @@
   --radius-lg: 6px;
   --radius-xl: 8px;
 
-  --primary: oklch(0.22 0.012 150);
-  --primary-foreground: oklch(0.98 0.005 95);
-  --ring: oklch(0.5 0.02 150);
-  --border: #e3e1d7;
-  --input: #d3d1c5;
-  --muted: #f0eee5;
-  --muted-foreground: #5c6157;
-  --secondary: #eceae0;
-  --accent: #eceae0;
+  --background: #070b09;
+  --foreground: #e6f5ec;
+  --card: #0e1513;
+  --card-foreground: #e6f5ec;
+  --popover: #0e1513;
+  --popover-foreground: #e6f5ec;
+  --primary: #5ef2b0;
+  --primary-foreground: #04160e;
+  --ring: rgba(94, 242, 176, 0.55);
+  --border: #1c2621;
+  --input: #24312b;
+  --muted: #111815;
+  --muted-foreground: #8fa79b;
+  --secondary: #14201b;
+  --accent: #16241e;
 
-  --cx-surface: #ffffff;
-  --cx-ink: #171a15;
-  --cx-ink-2: #575c52;
-  --cx-ink-3: #83887c;
-  --cx-rule: #e3e1d7;
+  --cx-bg: #070b09;
+  --cx-panel: #0b1110;
+  --cx-panel-2: #0e1513;
+  --cx-line: #1b2620;
+  --cx-line-strong: #26332c;
 
-  --cx-panel: #171b16;
-  --cx-panel-ink: #eef0e8;
+  --cx-ink: #e6f5ec;
+  --cx-ink-2: #9db2a7;
+  --cx-ink-3: #667a70;
 
-  --cx-ok: #4a6b57;
-  --cx-fail: #c2452c;
+  --cx-accent: #5ef2b0;
+  --cx-accent-soft: rgba(94, 242, 176, 0.12);
+  --cx-warn: #ffb86b;
+  --cx-danger: #ff6b5a;
+
+  color-scheme: dark;
 }
 
 .cx {
@@ -94,11 +104,24 @@
 }
 
 .cx-h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
+  color: var(--cx-ink);
+}
+
+.cx-h2::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--cx-accent);
+  box-shadow: 0 0 10px rgba(94, 242, 176, 0.8);
 }
 
 .cx-count {
@@ -121,15 +144,68 @@
   color: var(--cx-ink-3);
 }
 
+/* ---------- surface ---------- */
+
 .cx-surface {
-  border-radius: 8px;
-  background: var(--cx-surface);
+  position: relative;
+  border: 1px solid var(--cx-line);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(94, 242, 176, 0.03), transparent 42%),
+    var(--cx-panel);
   overflow: hidden;
 }
 
-/* A refresh dims the current numbers instead of blanking the table. */
-.cx-surface[data-fetching='true'] .cx-table {
-  opacity: 0.45;
+/* Pointer spotlight: the sheet reads as a lit surface, not a flat box. */
+.cx-surface::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms ease-out;
+  background: radial-gradient(
+    340px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(94, 242, 176, 0.07),
+    transparent 70%
+  );
+}
+
+.cx-surface:hover::after {
+  opacity: 1;
+}
+
+/* Refresh sweep: one pass of light down the sheet, then nothing. */
+.cx-sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 140px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(94, 242, 176, 0.1) 55%,
+    rgba(94, 242, 176, 0.45) 99%,
+    transparent
+  );
+  animation: cx-sweep 900ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes cx-sweep {
+  from {
+    transform: translateY(-140px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(70vh);
+    opacity: 0;
+  }
 }
 
 /* ---------- table ---------- */
@@ -144,17 +220,19 @@
 
 .cx-table thead th {
   padding: 11px 16px;
-  background: var(--cx-panel);
-  color: rgba(238, 240, 232, 0.62);
-  font-size: 12px;
+  border-bottom: 1px solid rgba(94, 242, 176, 0.16);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--cx-ink-2);
+  font-size: 11.5px;
   font-weight: 500;
+  letter-spacing: 0.06em;
   text-align: left;
   white-space: nowrap;
 }
 
 .cx-table td {
   padding: 13px 16px;
-  border-bottom: 1px solid var(--cx-rule);
+  border-bottom: 1px solid var(--cx-line);
   vertical-align: middle;
   color: var(--cx-ink);
 }
@@ -163,12 +241,17 @@
   border-bottom: 0;
 }
 
-.cx-table tbody tr {
-  transition: background-color 140ms ease-out;
+.cx-row {
+  cursor: pointer;
+  transition: background-color 160ms ease-out;
 }
 
-.cx-table tbody tr:hover {
-  background: rgba(23, 26, 21, 0.022);
+.cx-row:hover {
+  background: rgba(94, 242, 176, 0.045);
+}
+
+.cx-row[data-open='true'] {
+  background: rgba(94, 242, 176, 0.06);
 }
 
 .cx-table .cx-num {
@@ -182,23 +265,26 @@
 .cx-cell-main {
   font-size: 14px;
   font-weight: 500;
+  letter-spacing: -0.005em;
 }
 
 .cx-plat {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 
 .cx-plat i {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
+  width: 3px;
+  height: 18px;
+  border-radius: 1px;
+  background: currentColor;
+  box-shadow: 0 0 12px currentColor;
 }
 
 .cx-window {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--cx-ink-2);
   white-space: nowrap;
 }
@@ -209,52 +295,163 @@
   white-space: nowrap;
 }
 
-/* ---------- coverage cell ---------- */
+/* ---------- coverage array ---------- */
 
 .cx-cover {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: 7px;
 }
 
 .cx-cover-num {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1;
   letter-spacing: -0.01em;
+  color: var(--cx-ink);
+  text-shadow: 0 0 18px rgba(94, 242, 176, 0.25);
 }
 
-.cx-cover-num span {
-  font-weight: 400;
+.cx-cover-num > span {
   color: var(--cx-ink-3);
+  font-weight: 400;
 }
 
 .cx-cover-note {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--cx-ink-3);
   white-space: nowrap;
 }
 
 .cx-cover-note [data-tone='fail'] {
-  color: var(--cx-fail);
+  color: var(--cx-danger);
+}
+
+.cx-cells {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  min-width: 120px;
+  height: 20px;
+}
+
+.cx-cell {
+  flex: 1 1 0;
+  min-width: 1px;
+  border-radius: 1px;
+  background: rgba(94, 242, 176, 0.1);
+  transform-origin: bottom;
+  animation: cx-cell-in 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 3ms);
+}
+
+.cx-cell[data-state='ok'] {
+  background: linear-gradient(180deg, rgba(94, 242, 176, 0.85), rgba(94, 242, 176, 0.45));
+  box-shadow: 0 0 7px rgba(94, 242, 176, 0.22);
+}
+
+.cx-row:hover .cx-cell[data-state='ok'] {
+  background: linear-gradient(180deg, rgba(94, 242, 176, 1), rgba(94, 242, 176, 0.62));
+  box-shadow: 0 0 10px rgba(94, 242, 176, 0.4);
+}
+
+.cx-cell[data-state='fail'] {
+  background: var(--cx-danger);
+  box-shadow: 0 0 8px rgba(255, 107, 90, 0.55);
+}
+
+.cx-cell[data-state='new'] {
+  background: rgba(255, 184, 107, 0.55);
+}
+
+@keyframes cx-cell-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.15);
+  }
 }
 
 .cx-running {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--cx-ink-3);
+  gap: 6px;
+  margin-left: 10px;
+  font-size: 11.5px;
+  color: var(--cx-accent);
 }
 
 .cx-running::before {
   content: '';
   width: 5px;
   height: 5px;
-  border-radius: 1px;
+  border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: cx-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cx-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ---------- expanded telemetry ---------- */
+
+.cx-detail td {
+  padding: 0;
+  border-bottom: 1px solid var(--cx-line);
+  background: rgba(94, 242, 176, 0.025);
+}
+
+.cx-detail-inner {
+  overflow: hidden;
+}
+
+.cx-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--cx-line);
+  margin: 0 16px 14px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cx-detail-cell {
+  padding: 10px 14px;
+  background: var(--cx-panel-2);
+}
+
+.cx-detail-label {
+  margin: 0 0 5px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--cx-ink-3);
+}
+
+.cx-detail-value {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cx-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cx-detail-error {
+  margin: 0 16px 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 107, 90, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 107, 90, 0.07);
+  font-size: 12px;
+  color: #ffb3a8;
+}
+
+.cx-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 14px;
 }
 
 /* ---------- row actions ---------- */
@@ -270,33 +467,53 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 9px;
   margin: -4px -4px -4px 0;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 13px;
-  color: var(--cx-ink);
+  color: var(--cx-ink-2);
   text-decoration: none;
   background: none;
   border: 0;
   cursor: pointer;
-  transition: background-color 120ms ease-out, transform 90ms ease-out;
+  transition: background-color 120ms ease-out, color 120ms ease-out, transform 90ms ease-out;
+}
+
+.cx-link:hover {
+  background: rgba(94, 242, 176, 0.1);
+  color: var(--cx-ink);
 }
 
 .cx-link:active {
   transform: scale(0.96);
 }
 
-.cx-link:hover {
-  background: rgba(23, 26, 21, 0.05);
-}
-
 .cx-link:focus-visible {
-  outline: 2px solid var(--cx-ink);
+  outline: 2px solid var(--cx-accent);
   outline-offset: 1px;
 }
 
 .cx-link[data-quiet='true'] {
-  color: var(--cx-ink-2);
+  color: var(--cx-ink-3);
+}
+
+.cx-chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--cx-line-strong);
+  border-radius: 5px;
+  color: var(--cx-ink-3);
+  background: none;
+  cursor: pointer;
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms ease-out, border-color 140ms ease-out;
+}
+
+.cx-chevron[aria-expanded='true'] {
+  transform: rotate(90deg);
+  color: var(--cx-accent);
+  border-color: rgba(94, 242, 176, 0.4);
 }
 
 /* ---------- error / loading ---------- */
@@ -307,11 +524,11 @@
   justify-content: space-between;
   gap: 16px;
   padding: 13px 16px;
-  border: 1px solid #e7c8bd;
+  border: 1px solid rgba(255, 107, 90, 0.3);
   border-radius: 8px;
-  background: #fdf3f0;
+  background: rgba(255, 107, 90, 0.08);
   font-size: 13px;
-  color: #7a2e1c;
+  color: #ffb3a8;
 }
 
 .cx-error p {
@@ -320,16 +537,22 @@
 
 .cx-skel {
   border-radius: 6px;
-  background: rgba(23, 26, 21, 0.06);
+  background: rgba(94, 242, 176, 0.07);
 }
 
 .cx-skel-table {
   height: 320px;
-  border-radius: 8px;
-  background: rgba(23, 26, 21, 0.05);
+  border-radius: 10px;
+  background: rgba(94, 242, 176, 0.05);
 }
 
 /* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .cx-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 @media (max-width: 860px) {
   .cx-bar {
@@ -345,8 +568,14 @@
 @media (max-width: 720px) {
   .cx-surface {
     background: transparent;
+    border: 0;
     border-radius: 0;
     overflow: visible;
+  }
+
+  .cx-surface::after,
+  .cx-sweep {
+    display: none;
   }
 
   .cx-table,
@@ -361,12 +590,12 @@
     display: none;
   }
 
-  .cx-table tr {
+  .cx-table tr.cx-row,
+  .cx-table tr.cx-detail {
     margin-bottom: 8px;
-    padding: 10px 0;
-    border: 1px solid var(--cx-rule);
-    border-radius: 8px;
-    background: var(--cx-surface);
+    border: 1px solid var(--cx-line);
+    border-radius: 10px;
+    background: var(--cx-panel);
   }
 
   .cx-table td {
@@ -374,7 +603,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 4px 14px;
+    padding: 5px 14px;
     border-bottom: 0;
     text-align: right;
   }
@@ -386,14 +615,14 @@
 
   .cx-table td::before {
     content: attr(data-label);
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--cx-ink-3);
     text-align: left;
   }
 
   .cx-table td[data-block='true'] {
     display: block;
-    padding-bottom: 8px;
+    padding: 12px 14px 8px;
     text-align: left;
   }
 
@@ -404,16 +633,38 @@
   .cx-plat {
     font-size: 15px;
   }
+
+  .cx-cells {
+    min-width: 0;
+  }
+
+  .cx-detail td {
+    background: transparent;
+  }
+
+  .cx-detail-grid {
+    margin: 0 14px 12px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cx * {
+  .cx *,
+  .cx *::before,
+  .cx *::after {
     transition: none !important;
     animation: none !important;
   }
 }
 
-/* The console page sits on plain paper: drop the app-wide green wash while it is mounted. */
+/* The console page sits on the phosphor screen: kill the app-wide paper wash. */
 html.cx-page body {
-  background: #f7f5ef;
+  background:
+    radial-gradient(1200px 600px at 50% -12%, rgba(94, 242, 176, 0.07), transparent 62%),
+    linear-gradient(rgba(94, 242, 176, 0.02) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(90deg, rgba(94, 242, 176, 0.02) 1px, transparent 1px) 0 0 / 64px 100%,
+    #070b09;
+}
+
+html.cx-page {
+  background: #070b09;
 }

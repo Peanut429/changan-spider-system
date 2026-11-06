@@ -1,14 +1,14 @@
 const PLATFORM_COLOR: Record<string, string> = {
-  youtube: '#c4302b',
-  x: '#0f1419',
-  instagram: '#c13584',
-  facebook: '#1877f2',
-  tiktok: '#111111',
-  linkedin: '#0a66c2',
-  fake: '#8a8f84',
+  youtube: '#ff4d4d',
+  x: '#e8f0ec',
+  instagram: '#ff5fa2',
+  facebook: '#5b9cff',
+  tiktok: '#e8f0ec',
+  linkedin: '#4a9eff',
+  fake: '#8fa79b',
 }
 
-/** A 7px brand mark, the only saturated colour in the table. */
+/** Phosphor-brightened brand mark: the only saturated colour in the table. */
 export function platformColor(code: string): string {
-  return PLATFORM_COLOR[code?.toLowerCase()] ?? '#8a8f84'
+  return PLATFORM_COLOR[code?.toLowerCase()] ?? '#8fa79b'
 }
