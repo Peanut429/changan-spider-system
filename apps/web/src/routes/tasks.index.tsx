@@ -12,6 +12,7 @@ import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import Balatro from '@/components/Balatro/Balatro'
+import StarBorder from '@/components/StarBorder/StarBorder'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
@@ -426,16 +427,28 @@ function TasksPage() {
           </PopoverContent>
         </Popover>
         <Button variant="outline" size="icon" className="size-9" aria-label="刷新" onClick={refresh}>
-          <RefreshCw className={query.isFetching ? 'size-4 animate-spin' : 'size-4'} />
+          <RefreshCw className={query.isFetching ? 'size-4 animate-spin' : 'size-4 transition-transform duration-300 group-hover/button:rotate-90'} />
         </Button>
-        <Button
-          className="cx-primary h-9 gap-1.5"
-          onClick={() => setCreateOpen(true)}
+        <StarBorder
+          as="button"
+          className="cx-cta h-9 px-4 text-[13.5px]"
+          radius={6}
+          thickness={1}
+          color="#ffffff"
+          trailColor="#d7fff0"
+          backgroundColor="var(--primary)"
+          textColor="var(--primary-foreground)"
+          borderColor="color-mix(in oklab, var(--primary) 70%, transparent)"
+          duration={2600}
+          stars={1}
+          glow={0.9}
+          hover="lap"
           disabled={!platformsQuery.data?.platforms.length || !accountTypesQuery.data?.accountTypes.length}
+          onClick={() => setCreateOpen(true)}
         >
           <Plus className="size-4" />
           创建任务
-        </Button>
+        </StarBorder>
       </ConsoleBar>
 
       {query.isError ? (

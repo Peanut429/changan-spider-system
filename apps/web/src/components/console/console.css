@@ -330,6 +330,18 @@
   background-color: var(--cx-row-hover);
 }
 
+.cx-row:hover .cx-cells {
+  filter: saturate(1.25) brightness(1.1);
+}
+
+.cx-row:hover .cx-plat i {
+  transform: scaleY(1.15);
+}
+
+.cx-plat i {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .cx-table .cx-num {
   text-align: right;
 }
@@ -405,6 +417,7 @@
 
 .cx-cells {
   display: flex;
+  transition: filter 200ms ease-out;
   gap: 2px;
   width: 100%;
   min-width: 120px;
@@ -537,6 +550,7 @@
 .cx-link:hover {
   background: rgba(94, 242, 176, 0.1);
   color: var(--cx-ink);
+  transform: translateX(2px);
 }
 
 .cx-link:active {
@@ -657,6 +671,20 @@
 
 .cx-nav button[role='radio'][aria-checked='true'] {
   text-shadow: 0 0 14px color-mix(in oklab, var(--sidebar-foreground) 22%, transparent);
+}
+
+/* ---------- calendar ---------- */
+
+.cx-portal [data-slot='calendar'] button {
+  transition: background-color 140ms ease-out, color 140ms ease-out, transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cx-portal [data-slot='calendar'] button:hover:not([disabled]) {
+  transform: scale(1.06);
+}
+
+.cx-portal [data-slot='calendar'] button:active:not([disabled]) {
+  transform: scale(0.94);
 }
 
 /* ---------- theme switch ---------- */
