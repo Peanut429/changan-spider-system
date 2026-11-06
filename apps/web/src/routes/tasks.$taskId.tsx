@@ -20,10 +20,8 @@ import { getTask, rerunTask } from '@/lib/api'
 import { downloadTaskExcel } from '@/lib/export-task'
 import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
-import GlareHover from '@/components/GlareHover/GlareHover'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { ConsoleBar } from '@/components/console/console-bar'
-import { useTheme } from '@/lib/theme'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
 import { platformColor } from '@/components/console/platform-color'
@@ -406,8 +404,6 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
 function TaskDetailPage() {
   const { taskId } = Route.useParams()
   const reduceMotion = useReducedMotion()
-  const { theme } = useTheme()
-  const dark = theme === 'dark'
   const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) })
 
   if (query.isPending) {
@@ -534,20 +530,7 @@ function TaskDetailPage() {
           {run ? (
             <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <GlareHover
-                width="100%"
-                height="100%"
-                background="transparent"
-                borderColor="transparent"
-                borderRadius="10px"
-                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.55}
-                blendMode={dark ? 'screen' : 'multiply'}
-                mode="follow"
-                softness={0.78}
-                variant="sheen"
-                style={{ display: 'grid', placeItems: 'stretch' }}
-              >
+              <div className="cx-sheen">
 <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">执行结果</CardTitle></CardHeader>
                 <CardContent className="grid gap-2 text-xs">
@@ -559,21 +542,8 @@ function TaskDetailPage() {
                   <div className="flex justify-between"><span className="text-muted-foreground">内容成功/失败</span><span>{run.successContents} / {run.failedContents}</span></div>
                 </CardContent>
               </Card>
-              </GlareHover>
-              <GlareHover
-                width="100%"
-                height="100%"
-                background="transparent"
-                borderColor="transparent"
-                borderRadius="10px"
-                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.55}
-                blendMode={dark ? 'screen' : 'multiply'}
-                mode="follow"
-                softness={0.78}
-                variant="sheen"
-                style={{ display: 'grid', placeItems: 'stretch' }}
-              >
+              </div>
+              <div className="cx-sheen">
 <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">数据量</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-2 gap-3 text-xs">
@@ -583,21 +553,8 @@ function TaskDetailPage() {
                   <Metric label="内容总数" value={formatNumber(run.totalContents)} />
                 </CardContent>
               </Card>
-              </GlareHover>
-              <GlareHover
-                width="100%"
-                height="100%"
-                background="transparent"
-                borderColor="transparent"
-                borderRadius="10px"
-                glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.55}
-                blendMode={dark ? 'screen' : 'multiply'}
-                mode="follow"
-                softness={0.78}
-                variant="sheen"
-                style={{ display: 'grid', placeItems: 'stretch' }}
-              >
+              </div>
+              <div className="cx-sheen">
 <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">抓取设置</CardTitle></CardHeader>
                 <CardContent className="space-y-2 text-xs">
@@ -606,7 +563,7 @@ function TaskDetailPage() {
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">抓取结束</span><span className="text-right tabular-nums">{formatDateTime(run.windowUntil)}</span></div>
                 </CardContent>
               </Card>
-              </GlareHover>
+              </div>
             </div>
             {childTasks.length ? (
               <Card>
