@@ -71,13 +71,13 @@
 }
 
 :root[data-theme='dark'] {
-  --sidebar: #080c0a;
-  --sidebar-foreground: #ddebe3;
+  --sidebar: #1a2520;
+  --sidebar-foreground: #e2efe7;
   --sidebar-primary: #5ef2b0;
   --sidebar-primary-foreground: #04160e;
-  --sidebar-accent: #101815;
-  --sidebar-accent-foreground: #eafbf2;
-  --sidebar-border: #1a241f;
+  --sidebar-accent: #26352e;
+  --sidebar-accent-foreground: #f2fbf5;
+  --sidebar-border: #35443c;
   --sidebar-ring: rgba(94, 242, 176, 0.5);
 }
 
@@ -155,6 +155,11 @@
 }
 
 @layer utilities {
+  /* A soft top light so the rail reads as a raised surface in dark mode. */
+  .app-rail {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 24%);
+  }
+
   .surface {
     background: color-mix(in oklch, var(--card) 92%, transparent);
     backdrop-filter: blur(10px);

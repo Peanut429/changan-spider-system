@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
       style={{ '--app-sidebar-width': collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded } as CSSProperties}
     >
-      <aside id="app-sidebar" className="relative hidden flex-col overflow-hidden border-r border-sidebar-border/70 bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-screen lg:self-start">
+      <aside id="app-sidebar" className="app-rail relative hidden flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-screen lg:self-start">
         <div
           className={cn(
             'relative flex shrink-0 items-center gap-2.5 pb-6 pt-5',
@@ -154,7 +154,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="min-w-0">
         <div className="sticky top-0 z-30 lg:hidden">
-          <header className="flex items-center justify-between border-b border-sidebar-border/60 bg-sidebar/95 px-4 py-3 backdrop-blur-xl">
+          <header className="app-rail flex items-center justify-between border-b border-sidebar-border/70 bg-sidebar/95 px-4 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-2.5">
               <BrandMark />
               <div>
