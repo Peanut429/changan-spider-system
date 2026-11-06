@@ -53,8 +53,78 @@
 }
 
 .cx {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 96px);
   color: var(--cx-ink);
   font-size: 14px;
+}
+
+/* Slow atmosphere behind the panel: two blurred fields drifting out of phase. */
+.cx-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cx-ambient i {
+  position: absolute;
+  display: block;
+  width: 46vw;
+  height: 46vw;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.26;
+}
+
+.cx-ambient i:nth-child(1) {
+  left: -8vw;
+  top: -14vh;
+  background: radial-gradient(circle, rgba(94, 242, 176, 0.6), transparent 62%);
+  animation: cx-drift-a 28s ease-in-out infinite alternate;
+}
+
+.cx-ambient i:nth-child(2) {
+  right: -12vw;
+  top: 24vh;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.42), transparent 62%);
+  animation: cx-drift-b 36s ease-in-out infinite alternate;
+}
+
+@keyframes cx-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(6vw, 9vh, 0) scale(1.18); }
+}
+
+@keyframes cx-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.12); }
+  to { transform: translate3d(-9vw, -7vh, 0) scale(1); }
+}
+
+/* Channel change: a scanline wash when the day switches. */
+.cx-crt {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(94, 242, 176, 0.16) 0 1px,
+    transparent 1px 3px
+  );
+  animation: cx-crt 540ms steps(10, end) forwards;
+}
+
+@keyframes cx-crt {
+  0% { opacity: 0.9; transform: translateY(-3px) scaleY(1.015); }
+  40% { opacity: 0.35; transform: translateY(1px); }
+  100% { opacity: 0; transform: none; }
 }
 
 /* ---------- page bar ---------- */
@@ -69,7 +139,7 @@
 
 .cx-title {
   margin: 0;
-  font-size: 27px;
+  font-size: 32px;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.025em;
@@ -153,6 +223,7 @@
   background:
     linear-gradient(180deg, rgba(94, 242, 176, 0.03), transparent 42%),
     var(--cx-panel);
+  box-shadow: 0 50px 90px -60px rgba(0, 0, 0, 0.9);
   overflow: hidden;
 }
 
@@ -213,7 +284,7 @@
 .cx-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13.5px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   transition: opacity 180ms ease-out;
 }
@@ -231,7 +302,7 @@
 }
 
 .cx-table td {
-  padding: 13px 16px;
+  padding: 18px 16px;
   border-bottom: 1px solid var(--cx-line);
   vertical-align: middle;
   color: var(--cx-ink);
@@ -242,16 +313,21 @@
 }
 
 .cx-row {
-  cursor: pointer;
+  background-color: transparent;
+  background-image: none;
+  background-size: 240% 100%;
   transition: background-color 160ms ease-out;
 }
 
 .cx-row:hover {
-  background: rgba(94, 242, 176, 0.045);
+  background-color: rgba(94, 242, 176, 0.045);
+  background-image: linear-gradient(90deg, rgba(94, 242, 176, 0.14), transparent 46%);
+  animation: cx-row-scan 1.1s cubic-bezier(0.3, 0, 0.2, 1);
 }
 
-.cx-row[data-open='true'] {
-  background: rgba(94, 242, 176, 0.06);
+@keyframes cx-row-scan {
+  from { background-position: 120% 0; }
+  to { background-position: -60% 0; }
 }
 
 .cx-table .cx-num {
@@ -263,9 +339,9 @@
 }
 
 .cx-cell-main {
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: -0.005em;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
 .cx-plat {
@@ -277,14 +353,14 @@
 .cx-plat i {
   flex: 0 0 auto;
   width: 3px;
-  height: 18px;
+  height: 24px;
   border-radius: 1px;
   background: currentColor;
   box-shadow: 0 0 12px currentColor;
 }
 
 .cx-window {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--cx-ink-2);
   white-space: nowrap;
 }
@@ -305,7 +381,7 @@
 }
 
 .cx-cover-num {
-  font-size: 17px;
+  font-size: 22px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.01em;
@@ -333,7 +409,7 @@
   gap: 2px;
   width: 100%;
   min-width: 120px;
-  height: 20px;
+  height: 30px;
 }
 
 .cx-cell {
@@ -396,64 +472,6 @@
   50% { opacity: 0.25; }
 }
 
-/* ---------- expanded telemetry ---------- */
-
-.cx-detail td {
-  padding: 0;
-  border-bottom: 1px solid var(--cx-line);
-  background: rgba(94, 242, 176, 0.025);
-}
-
-.cx-detail-inner {
-  overflow: hidden;
-}
-
-.cx-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--cx-line);
-  margin: 0 16px 14px;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.cx-detail-cell {
-  padding: 10px 14px;
-  background: var(--cx-panel-2);
-}
-
-.cx-detail-label {
-  margin: 0 0 5px;
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  color: var(--cx-ink-3);
-}
-
-.cx-detail-value {
-  margin: 0;
-  font-size: 13px;
-  color: var(--cx-ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.cx-detail-error {
-  margin: 0 16px 14px;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 107, 90, 0.28);
-  border-radius: 6px;
-  background: rgba(255, 107, 90, 0.07);
-  font-size: 12px;
-  color: #ffb3a8;
-}
-
-.cx-detail-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 0 16px 14px;
-}
-
 /* ---------- row actions ---------- */
 
 .cx-row-actions {
@@ -495,25 +513,6 @@
 
 .cx-link[data-quiet='true'] {
   color: var(--cx-ink-3);
-}
-
-.cx-chevron {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--cx-line-strong);
-  border-radius: 5px;
-  color: var(--cx-ink-3);
-  background: none;
-  cursor: pointer;
-  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms ease-out, border-color 140ms ease-out;
-}
-
-.cx-chevron[aria-expanded='true'] {
-  transform: rotate(90deg);
-  color: var(--cx-accent);
-  border-color: rgba(94, 242, 176, 0.4);
 }
 
 /* ---------- error / loading ---------- */

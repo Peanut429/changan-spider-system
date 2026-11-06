@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, ChevronRight, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { CalendarDays, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { motion, useReducedMotion, useSpring } from 'motion/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
@@ -12,7 +12,7 @@ import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatWindow, todayKey } from '@/lib/format'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
-import { EASE_OUT, ROW_IN, ROW_STAGGER } from '@/components/console/motion'
+import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
 import { platformColor } from '@/components/console/platform-color'
 import { TaskDialog } from '@/components/task-dialog'
 import {
@@ -55,18 +55,6 @@ function taskRunClock(task: Task): string {
   if (!task.runStartedAt) return '—'
   if (!task.runFinishedAt) return `${formatClock(task.runStartedAt)} → 进行中`
   return `${formatClock(task.runStartedAt)} → ${formatClock(task.runFinishedAt)}`
-}
-
-function taskDuration(task: Task): string {
-  if (!task.runStartedAt) return '—'
-  const start = new Date(task.runStartedAt).getTime()
-  const end = task.runFinishedAt ? new Date(task.runFinishedAt).getTime() : Date.now()
-  if (Number.isNaN(start) || Number.isNaN(end)) return '—'
-  const minutes = Math.max(0, Math.round((end - start) / 60_000))
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  if (hours === 0) return `${rest} 分`
-  return `${hours} 小时 ${rest} 分`
 }
 
 function accountsOf(task: Task): number {
@@ -269,45 +257,6 @@ function PendingTable({ tasks, date, onDelete, deletingId }: { tasks: Task[]; da
   )
 }
 
-function TaskTelemetry({ task }: { task: Task }) {
-  return (
-    <div className="cx-detail-grid">
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">计划执行</p>
-        <p className="cx-detail-value">{formatDateTime(task.scheduledAt)}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">实际开始</p>
-        <p className="cx-detail-value">{formatDateTime(task.runStartedAt)}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">结束</p>
-        <p className="cx-detail-value">{task.runFinishedAt ? formatDateTime(task.runFinishedAt) : '进行中'}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">用时</p>
-        <p className="cx-detail-value">{taskDuration(task)}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">账号成功</p>
-        <p className="cx-detail-value">{task.successAccounts}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">账号失败</p>
-        <p className="cx-detail-value">{task.failedAccounts}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">新增待补</p>
-        <p className="cx-detail-value">{task.newAccounts}</p>
-      </div>
-      <div className="cx-detail-cell">
-        <p className="cx-detail-label">原始记录</p>
-        <p className="cx-detail-value">{task.rawRecordCount}</p>
-      </div>
-    </div>
-  )
-}
-
 function ExecutedTable({
   tasks,
   date,
@@ -320,7 +269,6 @@ function ExecutedTable({
   retryingId: string | null
 }) {
   const reduceMotion = useReducedMotion()
-  const [openId, setOpenId] = useState<string | null>(null)
 
   return (
     <table className="cx-table">
@@ -336,92 +284,37 @@ function ExecutedTable({
         </tr>
       </thead>
       <tbody>
-        {tasks.map((task, index) => {
-          const open = openId === task.id
-          const toggle = () => setOpenId(open ? null : task.id)
-          return (
-            <Fragment key={task.id}>
-              <motion.tr
-                className="cx-row"
-                data-open={open ? 'true' : undefined}
-                initial={reduceMotion ? false : { opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ ...ROW_IN, delay: Math.min(index * ROW_STAGGER, 0.2) }}
-                onClick={toggle}
-              >
-                <td data-block="true"><PlatformCell task={task} /></td>
-                <td data-label="账号类型">{task.accountType || '—'}</td>
-                <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
-                <td data-label="账号覆盖" className="cx-num">
-                  <Coverage
-                    success={task.successAccounts}
-                    total={accountsOf(task)}
-                    failed={task.failedAccounts}
-                    pending={task.newAccounts}
-                  />
-                </td>
-                <td data-label="内容" className="cx-num"><AnimatedNumber value={task.contentMetricCount} /></td>
-                <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
-                <td data-label="操作" className="cx-right">
-                  <div className="cx-row-actions">
-                    <ViewTaskLink task={task} date={date} />
-                    {task.status === 'failed' ? (
-                      <RetryTaskButton task={task} onRetry={onRetry} retrying={retryingId === task.id} />
-                    ) : null}
-                    <button
-                      type="button"
-                      className="cx-chevron"
-                      aria-expanded={open}
-                      aria-controls={`task-detail-${task.id}`}
-                      aria-label={open ? '收起任务详情' : '展开任务详情'}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        toggle()
-                      }}
-                    >
-                      <ChevronRight className="size-3.5" />
-                    </button>
-                  </div>
-                </td>
-              </motion.tr>
-
-              <AnimatePresence initial={false}>
-                {open ? (
-                  <motion.tr
-                    key="detail"
-                    id={`task-detail-${task.id}`}
-                    className="cx-detail"
-                    initial={reduceMotion ? false : { opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={reduceMotion ? undefined : { opacity: 0 }}
-                  >
-                    <td colSpan={7}>
-                      <motion.div
-                        className="cx-detail-inner"
-                        initial={reduceMotion ? false : { height: 0 }}
-                        animate={{ height: 'auto' }}
-                        exit={reduceMotion ? undefined : { height: 0 }}
-                        transition={{ duration: 0.3, ease: EASE_OUT }}
-                      >
-                        <div style={{ paddingTop: 14 }}>
-                          <TaskTelemetry task={task} />
-                          {task.runError || task.lastError ? (
-                            <p className="cx-detail-error">{task.runError || task.lastError}</p>
-                          ) : null}
-                          <div className="cx-detail-actions">
-                            <Link className="cx-link" to="/tasks/$taskId" params={{ taskId: task.id }} search={{ date }}>
-                              查看完整明细
-                            </Link>
-                          </div>
-                        </div>
-                      </motion.div>
-                    </td>
-                  </motion.tr>
+        {tasks.map((task, index) => (
+          <motion.tr
+            key={task.id}
+            className="cx-row"
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ ...ROW_IN, delay: Math.min(index * ROW_STAGGER, 0.2) }}
+          >
+            <td data-block="true"><PlatformCell task={task} /></td>
+            <td data-label="账号类型">{task.accountType || '—'}</td>
+            <td data-label="周期"><span className="cx-window">{taskWindow(task)}</span></td>
+            <td data-label="账号覆盖" className="cx-num">
+              <Coverage
+                success={task.successAccounts}
+                total={accountsOf(task)}
+                failed={task.failedAccounts}
+                pending={task.newAccounts}
+              />
+            </td>
+            <td data-label="内容" className="cx-num"><AnimatedNumber value={task.contentMetricCount} /></td>
+            <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
+            <td data-label="操作" className="cx-right">
+              <div className="cx-row-actions">
+                <ViewTaskLink task={task} date={date} />
+                {task.status === 'failed' ? (
+                  <RetryTaskButton task={task} onRetry={onRetry} retrying={retryingId === task.id} />
                 ) : null}
-              </AnimatePresence>
-            </Fragment>
-          )
-        })}
+              </div>
+            </td>
+          </motion.tr>
+        ))}
       </tbody>
     </table>
   )
@@ -451,6 +344,8 @@ function TasksPage() {
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const [sweep, setSweep] = useState(1)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const tiltX = useSpring(0, { bounce: 0, duration: 0.5 })
+  const tiltY = useSpring(0, { bounce: 0, duration: 0.5 })
   const query = useQuery({ queryKey: ['tasks', date], queryFn: () => getTasks(date) })
   const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: getPlatforms })
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
@@ -500,12 +395,22 @@ function TasksPage() {
     void query.refetch()
   }
 
+  // The panel is a physical object: it leans toward the pointer and its
+  // highlight moves with it.
   const trackPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     const surface = surfaceRef.current
     if (!surface) return
     const rect = surface.getBoundingClientRect()
     surface.style.setProperty('--mx', `${event.clientX - rect.left}px`)
     surface.style.setProperty('--my', `${event.clientY - rect.top}px`)
+    if (reduceMotion) return
+    tiltY.set(((event.clientX - rect.left) / rect.width - 0.5) * 10)
+    tiltX.set(-((event.clientY - rect.top) / rect.height - 0.5) * 6)
+  }
+
+  const resetTilt = () => {
+    tiltX.set(0)
+    tiltY.set(0)
   }
 
   const dateLabel = format(selectedDate, 'yyyy年M月d日 EEEE', { locale: zhCN })
@@ -514,6 +419,11 @@ function TasksPage() {
 
   return (
     <div className="cx">
+      <div className="cx-ambient" aria-hidden="true">
+        <i />
+        <i />
+      </div>
+
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
@@ -586,10 +496,13 @@ function TasksPage() {
               className="cx-surface"
               data-fetching={query.isFetching ? 'true' : undefined}
               onPointerMove={trackPointer}
+              onPointerLeave={resetTilt}
+              style={{ rotateX: tiltX, rotateY: tiltY, transformPerspective: 1500 }}
               initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={ROW_IN}
             >
+              {!reduceMotion ? <span className="cx-crt" aria-hidden="true" /> : null}
               {!reduceMotion ? <span key={sweep} className="cx-sweep" aria-hidden="true" /> : null}
               {query.data.executed.length > 0 ? (
                 <ExecutedTable
