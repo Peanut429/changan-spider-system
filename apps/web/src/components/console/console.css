@@ -724,6 +724,26 @@
   color: #ffb3a8 !important;
 }
 
+/* ---------- section tabs (PillNav) ---------- */
+
+.cx-viewtabs {
+  --pn-surface: transparent;
+  --pn-solid: transparent;
+  --pn-edge: transparent;
+  --pn-rim: transparent;
+  --pn-shadow: none;
+  --pn-text: var(--cx-ink-3);
+  --pn-strong: var(--cx-ink);
+  --pn-pill: color-mix(in oklab, var(--cx-accent) 16%, transparent);
+  --pn-pill-ink: var(--cx-ink);
+  --pn-pill-shadow: none;
+  --pn-dot: var(--cx-accent);
+  --pn-ring: color-mix(in oklab, var(--cx-accent) 55%, transparent);
+  --pn-row-hover: color-mix(in oklab, var(--cx-accent) 10%, transparent);
+  --pn-tile: transparent;
+  --pn-tile-rim: transparent;
+}
+
 /* ---------- toolbar ---------- */
 
 .cx-toolbar {

@@ -1,7 +1,7 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { LayoutDashboard, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
-import RubberSegment from '@/components/RubberSegment/RubberSegment'
+import GooeyNav from '@/components/GooeyNav/GooeyNav'
 import { ThemeToggle } from '@/components/console/theme-toggle'
 import { todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
@@ -42,24 +42,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
 
           <nav className="min-w-0">
-            <RubberSegment
-              aria-label="主导航"
-              items={NAV_ITEMS.map((item) => ({ value: item.to, label: item.label, icon: item.icon }))}
-              value={section}
-              onChange={(value) => {
-                if (value === section) return
-                if (value === '/tasks') navigate({ to: '/tasks', search: { date: todayKey() } })
+            <GooeyNav
+              items={NAV_ITEMS.map((item) => ({ label: item.label, icon: item.icon }))}
+              activeIndex={section === '/accounts' ? 1 : 0}
+              onChange={(index) => {
+                const target = index === 1 ? '/accounts' : '/tasks'
+                if (target === section) return
+                if (target === '/tasks') navigate({ to: '/tasks', search: { date: todayKey() } })
                 else navigate({ to: '/accounts' })
               }}
-              size="md"
-              radius={9}
-              inset={3}
-              className="cx-nav"
-              trackColor="transparent"
-              thumbColor="color-mix(in oklab, var(--sidebar-foreground) 13%, transparent)"
-              textColor="color-mix(in oklab, var(--sidebar-foreground) 62%, transparent)"
-              activeTextColor="var(--sidebar-foreground)"
-              stretch={70}
+              size="sm"
+              frame={false}
+              color={theme === 'dark' ? '#2b3a33' : '#e7ece5'}
+              activeTextColor={theme === 'dark' ? '#eafbf2' : '#0d1712'}
+              colors={theme === 'dark' ? ['#5ef2b0', '#a8ffdc', '#9db2a7'] : ['#0f7a55', '#4ea985', '#56635b']}
+              gooeyness={1.4}
+              particleCount={10}
             />
           </nav>
 

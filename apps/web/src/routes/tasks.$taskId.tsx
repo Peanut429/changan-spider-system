@@ -34,7 +34,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
+import PillNav from '@/components/PillNav/PillNav'
+import { useTheme } from '@/lib/theme'
 import { Checkbox } from '@/components/ui/checkbox'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
@@ -404,6 +406,8 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
 function TaskDetailPage() {
   const { taskId } = Route.useParams()
   const reduceMotion = useReducedMotion()
+  const { theme } = useTheme()
+  const [view, setView] = useState('accounts')
   const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) })
 
   if (query.isPending) {
@@ -509,20 +513,50 @@ function TaskDetailPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="accounts" className="flex-col gap-4">
-        <TabsList className="h-auto w-fit flex-wrap bg-muted/60 p-1">
-          <TabsTrigger value="accounts" className="gap-1.5 px-3">
-            <UsersRound className="size-3.5" />账号数据
-            <Badge variant="secondary" className="ml-0.5 h-5 px-1.5 text-[10px]">{accounts.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="contents" className="gap-1.5 px-3">
-            <FileText className="size-3.5" />帖子数据
-            <Badge variant="secondary" className="ml-0.5 h-5 px-1.5 text-[10px]">{contents.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="run" className="gap-1.5 px-3">
-            <Info className="size-3.5" />执行信息
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={view} onValueChange={setView} className="flex-col gap-4">
+        <div className="cx-viewtabs">
+          <PillNav
+            ariaLabel="任务数据视图"
+            items={[
+              { label: `账号数据 ${accounts.length}`, href: '#accounts', icon: <UsersRound className="size-3.5" /> },
+              { label: `帖子数据 ${contents.length}`, href: '#contents', icon: <FileText className="size-3.5" /> },
+              { label: '执行信息', href: '#run', icon: <Info className="size-3.5" /> },
+            ]}
+            activeHref={`#${view}`}
+            onItemClick={(item, _index, event) => {
+              event.preventDefault()
+              setView((item.href || '#accounts').slice(1))
+            }}
+            theme={theme}
+            size="sm"
+            surface="none"
+            layout="joined"
+            collapse="never"
+            indicator="dot"
+            hoverEffect="glide"
+            highlightColor={theme === 'dark' ? 'rgba(94,242,176,.16)' : 'rgba(15,122,85,.12)'}
+            highlightTextColor={theme === 'dark' ? '#eafbf2' : '#0d1712'}
+            style={
+              {
+                '--pn-surface': 'transparent',
+                '--pn-solid': 'transparent',
+                '--pn-edge': 'transparent',
+                '--pn-rim': 'transparent',
+                '--pn-shadow': 'none',
+                '--pn-text': 'var(--cx-ink-3)',
+                '--pn-strong': 'var(--cx-ink)',
+                '--pn-pill': 'color-mix(in oklab, var(--cx-accent) 18%, transparent)',
+                '--pn-pill-ink': 'var(--cx-ink)',
+                '--pn-pill-shadow': 'none',
+                '--pn-dot': 'var(--cx-accent)',
+                '--pn-ring': 'color-mix(in oklab, var(--cx-accent) 55%, transparent)',
+                '--pn-row-hover': 'color-mix(in oklab, var(--cx-accent) 10%, transparent)',
+                '--pn-tile': 'transparent',
+                '--pn-tile-rim': 'transparent',
+              } as React.CSSProperties
+            }
+          />
+        </div>
 
         <TabsContent value="accounts"><AccountTable accounts={accounts} coverage={coverage} taskId={task.id} /></TabsContent>
         <TabsContent value="contents"><ContentTable contents={contents} /></TabsContent>
