@@ -329,7 +329,7 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">共 {filtered.length} 条内容，当前显示 {visible.length} 条</p>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">按账号筛选</span>
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">按账号筛选</span>
           <Select value={accountFilter} onValueChange={setAccountFilter}>
             <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent className="cx-portal">
@@ -341,7 +341,7 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
           </Select>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
+      <div className="cx-surface overflow-x-auto">
         <Table className="min-w-[1120px]">
           <TableHeader>
             <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
