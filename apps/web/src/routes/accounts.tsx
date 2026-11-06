@@ -26,7 +26,7 @@ import StarBorder from '@/components/StarBorder/StarBorder'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
+import SquishSwitch from '@/components/SquishSwitch/SquishSwitch'
 import '@/components/console/console.css'
 
 export const Route = createFileRoute('/accounts')({
@@ -237,10 +237,17 @@ function AccountsPage() {
                     <td data-label="类型">{account.accountType || '—'}</td>
                     <td data-label="状态">
                       <span className="cx-switch">
-                        <Switch
+                        <SquishSwitch
                           checked={account.active}
                           disabled={switchingId === account.id}
-                          onCheckedChange={(checked) => void toggleActive(account, checked)}
+                          onChange={(checked) => void toggleActive(account, checked)}
+                          width={34}
+                          height={20}
+                          trackColor="color-mix(in oklab, var(--cx-ink) 16%, transparent)"
+                          trackOnColor="color-mix(in oklab, var(--cx-accent) 78%, transparent)"
+                          thumbColor="var(--cx-ink)"
+                          thumbOnColor="#04211a"
+                          ariaLabel={`${account.handle} 启用状态`}
                         />
                         <span data-on={account.active ? 'true' : undefined}>
                           {account.active ? '启用' : '停用'}

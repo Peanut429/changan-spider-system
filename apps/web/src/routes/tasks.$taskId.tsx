@@ -20,6 +20,8 @@ import { getTask, rerunTask } from '@/lib/api'
 import { downloadTaskExcel } from '@/lib/export-task'
 import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
+import GlareHover from '@/components/GlareHover/GlareHover'
+import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
@@ -181,22 +183,23 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {filters.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            title={item.key === 'action' ? '失败账号 + 新增待补账号' : undefined}
-            onClick={() => setFilter(item.key)}
-            className={cn(
-              'cx-chip',
-              effectiveFilter === item.key ? 'cx-chip--on' : '',
-            )}
-          >
-            {item.label} {item.count}
-          </button>
-        ))}
-        <span className="text-[10px] text-muted-foreground">“需处理” = 失败账号 + 新增待补账号</span>
+      <div className="cx-chips-row">
+        <div className="cx-chips">
+          <RubberSegment
+            aria-label="账号筛选"
+            size="sm"
+            equalSlots={false}
+            inset={2}
+            items={filters.map((item) => ({ value: item.key, label: `${item.label} ${item.count}` }))}
+            value={effectiveFilter}
+            onChange={(value) => setFilter(value)}
+            trackColor="transparent"
+            thumbColor="color-mix(in oklab, var(--cx-accent) 16%, transparent)"
+            textColor="var(--cx-ink-2)"
+            activeTextColor="var(--cx-ink)"
+          />
+        </div>
+        <span className="cx-hint">“需处理” = 失败账号 + 新增待补账号</span>
       </div>
 
       {selected.size > 0 ? (
@@ -328,7 +331,7 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
           <span className="text-xs text-muted-foreground">按账号筛选</span>
           <Select value={accountFilter} onValueChange={setAccountFilter}>
             <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
+            <SelectContent className="cx-portal">
               <SelectItem value="all">全部账号</SelectItem>
               {accounts.map((account) => (
                 <SelectItem key={account.id} value={account.id}>{account.label}</SelectItem>
@@ -372,7 +375,7 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
                     <span className="text-xs font-medium">{content.accountHandle}</span>
                   </div>
                 </TableCell>
-                <TableCell><Badge variant="secondary" className="text-[10px]">{content.contentType || '内容'}</Badge></TableCell>
+                <TableCell><span className="cx-tag">{content.contentType || '内容'}</span></TableCell>
                 <TableCell className="text-xs tabular-nums text-muted-foreground">{formatDateTime(content.publishTime)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(content.playCount ?? content.readCount ?? content.exposureCount)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(content.likeCount)}</TableCell>
@@ -528,7 +531,18 @@ function TaskDetailPage() {
           {run ? (
             <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Card>
+              <GlareHover
+                width="100%"
+                height="100%"
+                background="transparent"
+                borderColor="transparent"
+                borderRadius="10px"
+                glareColor="#5ef2b0"
+                glareOpacity={0.16}
+                variant="sheen"
+                style={{ display: 'grid', placeItems: 'stretch' }}
+              >
+<Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">执行结果</CardTitle></CardHeader>
                 <CardContent className="grid gap-2 text-xs">
                   <div className="flex justify-between"><span className="text-muted-foreground">执行状态</span><StatusBadge status={run.status} /></div>
@@ -539,7 +553,19 @@ function TaskDetailPage() {
                   <div className="flex justify-between"><span className="text-muted-foreground">内容成功/失败</span><span>{run.successContents} / {run.failedContents}</span></div>
                 </CardContent>
               </Card>
-              <Card>
+              </GlareHover>
+              <GlareHover
+                width="100%"
+                height="100%"
+                background="transparent"
+                borderColor="transparent"
+                borderRadius="10px"
+                glareColor="#5ef2b0"
+                glareOpacity={0.16}
+                variant="sheen"
+                style={{ display: 'grid', placeItems: 'stretch' }}
+              >
+<Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">数据量</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-2 gap-3 text-xs">
                   <Metric label="原始数据" value={formatNumber(run.rawRecordCount)} />
@@ -548,7 +574,19 @@ function TaskDetailPage() {
                   <Metric label="内容总数" value={formatNumber(run.totalContents)} />
                 </CardContent>
               </Card>
-              <Card>
+              </GlareHover>
+              <GlareHover
+                width="100%"
+                height="100%"
+                background="transparent"
+                borderColor="transparent"
+                borderRadius="10px"
+                glareColor="#5ef2b0"
+                glareOpacity={0.16}
+                variant="sheen"
+                style={{ display: 'grid', placeItems: 'stretch' }}
+              >
+<Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">抓取设置</CardTitle></CardHeader>
                 <CardContent className="space-y-2 text-xs">
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">执行日期</span><span>{formatFullDate(run.startedAt)}</span></div>
@@ -556,6 +594,7 @@ function TaskDetailPage() {
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">抓取结束</span><span className="text-right tabular-nums">{formatDateTime(run.windowUntil)}</span></div>
                 </CardContent>
               </Card>
+              </GlareHover>
             </div>
             {childTasks.length ? (
               <Card>
