@@ -2,6 +2,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { LayoutDashboard, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GooeyNav from '@/components/GooeyNav/GooeyNav'
+import { ConsoleBackdrop } from '@/components/console/console-backdrop'
 import { ThemeToggle } from '@/components/console/theme-toggle'
 import { todayKey } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
+      <ConsoleBackdrop />
       <header className="app-rail sticky top-0 z-40 border-b border-sidebar-border/70 bg-sidebar/95 backdrop-blur-xl">
         <div className="mx-auto flex h-14 w-full max-w-[1480px] items-center gap-3 px-4 sm:gap-5 sm:px-6 lg:px-9">
           <Link to="/" className="flex shrink-0 items-center gap-2.5" aria-label="RPA Console">
