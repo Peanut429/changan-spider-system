@@ -46,6 +46,15 @@ export function statusTone(status: string | null | undefined, runStatus?: string
   return 'pending'
 }
 
+const TONE_TEXT: Record<StatusTone, string> = {
+  pending: 'text-muted-foreground',
+  running: 'text-sky-400',
+  success: 'text-emerald-400',
+  partial: 'text-orange-400',
+  failed: 'text-rose-400',
+  cancelled: 'text-muted-foreground',
+}
+
 export function StatusBadge({
   status,
   runStatus,
@@ -58,7 +67,7 @@ export function StatusBadge({
   const tone = statusTone(status, runStatus)
   const meta = META[tone]
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset', meta.className, className)}>
+    <span className={cn('inline-flex items-center gap-2 text-xs font-medium', TONE_TEXT[tone], className)}>
       <span className={cn('size-1.5 rounded-full', meta.dot)} />
       {meta.label}
     </span>

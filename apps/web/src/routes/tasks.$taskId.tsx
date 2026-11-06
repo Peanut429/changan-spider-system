@@ -20,8 +20,10 @@ import { getTask, rerunTask } from '@/lib/api'
 import { downloadTaskExcel } from '@/lib/export-task'
 import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
-import { PageHeader } from '@/components/page-header'
-import { PlatformBadge } from '@/components/platform-badge'
+import { ConsoleBar } from '@/components/console/console-bar'
+import { ConsolePage } from '@/components/console/console-page'
+import '@/components/console/console.css'
+import { platformColor } from '@/components/console/platform-color'
 import { StatusBadge } from '@/components/status-badge'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
@@ -51,21 +53,21 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 }
 
 const coverageMeta: Record<string, { label: string; className: string; dot: string }> = {
-  success: { label: '成功', className: 'bg-emerald-50 text-emerald-800 ring-emerald-200/80', dot: 'bg-emerald-500' },
-  failed: { label: '失败', className: 'bg-rose-50 text-rose-800 ring-rose-200/80', dot: 'bg-rose-500' },
-  partial: { label: '部分失败', className: 'bg-orange-50 text-orange-800 ring-orange-200/80', dot: 'bg-orange-500' },
-  pending: { label: '新增待补', className: 'bg-sky-50 text-sky-800 ring-sky-200/80', dot: 'bg-sky-500' },
-  running: { label: '执行中', className: 'bg-sky-50 text-sky-800 ring-sky-200/80', dot: 'bg-sky-500 animate-soft-pulse' },
-  disabled: { label: '已禁用', className: 'bg-muted text-muted-foreground ring-border', dot: 'bg-muted-foreground/50' },
+  success: { label: '成功', className: 'text-emerald-400', dot: 'bg-emerald-400' },
+  failed: { label: '失败', className: 'text-rose-400', dot: 'bg-rose-400' },
+  partial: { label: '部分失败', className: 'text-orange-400', dot: 'bg-orange-400' },
+  pending: { label: '新增待补', className: 'text-sky-400', dot: 'bg-sky-400' },
+  running: { label: '执行中', className: 'text-sky-400', dot: 'bg-sky-400 animate-soft-pulse' },
+  disabled: { label: '已禁用', className: 'text-muted-foreground', dot: 'bg-muted-foreground/50' },
 }
 
 function CoverageStatus({ account }: { account: TaskAccount }) {
   const isZero = account.status === 'success' && Number(account.contentCountInWindow || 0) === 0
   const meta = isZero
-    ? { label: '成功但 0 条', className: 'bg-amber-50 text-amber-800 ring-amber-200/80', dot: 'bg-amber-500' }
+    ? { label: '成功但 0 条', className: 'text-amber-400', dot: 'bg-amber-400' }
     : coverageMeta[account.status] || coverageMeta.pending
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset', meta.className)}>
+    <span className={cn('inline-flex items-center gap-2 text-xs font-medium', meta.className)}>
       <span className={cn('size-1.5 rounded-full', meta.dot)} />
       {meta.label}
     </span>
@@ -187,8 +189,8 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
             title={item.key === 'action' ? '失败账号 + 新增待补账号' : undefined}
             onClick={() => setFilter(item.key)}
             className={cn(
-              'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-              effectiveFilter === item.key ? 'border-primary/30 bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
+              'cx-chip',
+              effectiveFilter === item.key ? 'cx-chip--on' : '',
             )}
           >
             {item.label} {item.count}
@@ -416,7 +418,7 @@ function TaskDetailPage() {
 
   if (query.isError) {
     return (
-      <Card className="border-rose-200 bg-rose-50/60">
+      <Card className="cx-banner">
         <CardContent className="flex items-start gap-3 py-6">
           <CircleAlert className="mt-0.5 size-4 text-rose-700" />
           <div>
@@ -438,13 +440,14 @@ function TaskDetailPage() {
         ? dateKeyFromDate(new Date(task.scheduledAt))
         : todayKey()
   return (
+    <ConsolePage>
     <motion.div
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
       className="space-y-6"
     >
-      <PageHeader
+      <ConsoleBar
         title={task.platformName}
         description="查看任务结果、账号数据和帖子数据。"
         actions={
@@ -476,7 +479,10 @@ function TaskDetailPage() {
         <CardContent className="p-0">
           <div className="flex flex-col gap-4 border-b border-border/70 bg-muted/25 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2.5">
-              <PlatformBadge code={task.platformCode} />
+              <span className="cx-plat">
+                <i style={{ color: platformColor(task.platformCode) }} aria-hidden="true" />
+                <span>{task.platformName}</span>
+              </span>
               <StatusBadge status={task.status} runStatus={task.runStatus} />
               <Badge variant="outline" className="font-normal">{task.accountType || '未设置账号类型'}</Badge>
             </div>
@@ -493,7 +499,7 @@ function TaskDetailPage() {
           </div>
 
           {run?.errorMessage || task.lastError ? (
-            <div className="mx-4 mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs text-rose-800">
+            <div className="cx-banner mx-4 mb-4 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs">
               <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span>{run?.errorMessage || task.lastError}</span>
             </div>
@@ -589,5 +595,6 @@ function TaskDetailPage() {
         </TabsContent>
       </Tabs>
     </motion.div>
+    </ConsolePage>
   )
 }

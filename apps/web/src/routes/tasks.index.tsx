@@ -10,11 +10,10 @@ import { zhCN } from 'date-fns/locale'
 import { deleteTask, getAccountTypes, getPlatforms, getTasks } from '@/lib/api'
 import type { Task } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
-import { useTheme } from '@/lib/theme'
-import Balatro from '@/components/Balatro/Balatro'
 import StarBorder from '@/components/StarBorder/StarBorder'
 import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
+import { ConsolePage } from '@/components/console/console-page'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
 import { platformColor } from '@/components/console/platform-color'
 import { TaskDialog } from '@/components/task-dialog'
@@ -341,7 +340,6 @@ function TasksPage() {
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
   const reduceMotion = useReducedMotion()
-  const { theme } = useTheme()
 
   // The console page sits on its own phosphor screen instead of the app's paper.
   useEffect(() => {
@@ -380,29 +378,7 @@ function TasksPage() {
   if (query.isPending) return <LoadingState />
 
   return (
-    <div className="cx">
-      <div className="cx-field" aria-hidden="true">
-        <Balatro
-          color1={theme === 'dark' ? '#04100c' : '#e9efea'}
-          color2={theme === 'dark' ? '#0a3d2c' : '#a8c4b6'}
-          color3={theme === 'dark' ? '#2fae7d' : '#0f7a55'}
-          swirl={0.7}
-          speed={0.35}
-          rotationSpeed={0.12}
-          scale={1.1}
-          detail={3}
-          pixelSize={2}
-          contrast={1.1}
-          lighting={0.4}
-          mouseInteraction
-          mouseStrength={0.7}
-          clickSwirl
-          lightMode={theme === 'light'}
-          opacity={theme === 'dark' ? 0.5 : 0.7}
-          maxDevicePixelRatio={1.5}
-        />
-      </div>
-
+    <ConsolePage>
       <ConsoleBar title="任务数据" description="查看当天抓取任务和执行结果。">
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
@@ -524,6 +500,6 @@ function TasksPage() {
           }
         }}
       />
-    </div>
+    </ConsolePage>
   )
 }
