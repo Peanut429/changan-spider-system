@@ -541,9 +541,9 @@ function TaskDetailPage() {
                 borderColor="transparent"
                 borderRadius="10px"
                 glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.5}
+                glareOpacity={dark ? 0.34 : 0.55}
                 blendMode={dark ? 'screen' : 'multiply'}
-                playOnce
+                mode="follow"
                 softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
@@ -567,9 +567,9 @@ function TaskDetailPage() {
                 borderColor="transparent"
                 borderRadius="10px"
                 glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.5}
+                glareOpacity={dark ? 0.34 : 0.55}
                 blendMode={dark ? 'screen' : 'multiply'}
-                playOnce
+                mode="follow"
                 softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
@@ -591,9 +591,9 @@ function TaskDetailPage() {
                 borderColor="transparent"
                 borderRadius="10px"
                 glareColor={dark ? '#a8ffdc' : '#a9dcc4'}
-                glareOpacity={dark ? 0.34 : 0.5}
+                glareOpacity={dark ? 0.34 : 0.55}
                 blendMode={dark ? 'screen' : 'multiply'}
-                playOnce
+                mode="follow"
                 softness={0.78}
                 variant="sheen"
                 style={{ display: 'grid', placeItems: 'stretch' }}
