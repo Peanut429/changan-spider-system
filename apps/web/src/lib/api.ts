@@ -41,6 +41,20 @@ export function getTask(id: string) {
   return request<TaskDetailResponse>(`/api/tasks/${encodeURIComponent(id)}`)
 }
 
+export function rerunTask(
+  id: string,
+  mode: 'failed' | 'new' | 'selected',
+  accountIds?: string[],
+) {
+  return request<{ task: Task; accountCount: number; mode: string }>(
+    `/api/tasks/${encodeURIComponent(id)}/rerun`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ mode, accountIds }),
+    },
+  )
+}
+
 export function getPlatforms() {
   return request<{ platforms: Platform[] }>('/api/platforms')
 }

@@ -12,16 +12,19 @@ export async function loadPlatformAccounts({
   platformCode,
   accountType,
   account,
+  accountIds,
   limit = 0,
 }: {
   db: Database;
   platformCode: string;
   accountType: string;
   account?: string;
+  accountIds?: string[];
   limit?: number;
 }): Promise<SourceAccount[]> {
   const rows = await db
     .select({
+      id: socialAccounts.id,
       account: socialAccounts.handle,
       link: socialAccounts.profileUrl,
     })
@@ -35,7 +38,9 @@ export async function loadPlatformAccounts({
     ))
     .orderBy(socialAccounts.handle);
 
+  const neededIds = accountIds?.length ? new Set(accountIds) : null;
   const filtered = rows
+    .filter((row) => !neededIds || neededIds.has(row.id))
     .map((row) => ({ account: row.account, link: row.link }))
     .filter((row) => row.account && row.link)
     .filter((row) => !account || row.account === account);

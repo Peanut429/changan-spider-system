@@ -180,6 +180,7 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   const pendingResult = await pool.query(
     `${taskSelect}
       where t.status = 'pending'
+        and t.params->>'parentTaskId' is null
         and (to_timestamp(t.scheduled_at_ms / 1000) at time zone $2)::date = $1::date
       order by t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc`,
     [date, TIME_ZONE],
@@ -187,6 +188,7 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   const executedResult = await pool.query(
     `${taskSelect}
       where t.status in ('running', 'success', 'failed', 'cancelled')
+        and t.params->>'parentTaskId' is null
         and (to_timestamp(coalesce(r.started_ts_ms, t.scheduled_at_ms) / 1000) at time zone $2)::date = $1::date
       order by coalesce(r.started_ts_ms, t.scheduled_at_ms) asc, t.priority asc`,
     [date, TIME_ZONE],
@@ -206,116 +208,235 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   return { date, summary, pending, executed };
 }
 
+
+async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
+  const params = task.params || {};
+  const scopeAccountIds = Array.isArray(params.accountIds)
+    ? params.accountIds.map((value: unknown) => String(value)).filter(Boolean)
+    : null;
+  const accountFilter = text(params.account);
+  const accountsResult = await pool.query(
+    `select a.id, a.handle, a.display_name, a.profile_url, a.active,
+            a.account_type, a.created_ts_ms, p.code as platform_code
+       from social_accounts a
+       join platforms p on p.id = a.platform_id
+      where a.platform_id = $1
+        and ($2::text is null or a.account_type = $2)
+        and ($3::text = '' or a.handle = $3)
+        and ($4::boolean = false or a.id = any($5::text[]))
+      order by a.handle`,
+    [task.platform_id, task.account_type, accountFilter, Boolean(scopeAccountIds), scopeAccountIds || []],
+  );
+
+  const childTasksResult = await pool.query(
+    `select t.id, t.status, t.run_id, t.params->>'taskKind' as task_kind,
+            t.params->'accountIds' as account_ids,
+            t.scheduled_at_ms, t.created_ts_ms,
+            r.status as run_status, r.started_ts_ms, r.finished_ts_ms,
+            r.total_accounts, r.success_accounts, r.failed_accounts, r.content_metric_count
+       from scrape_tasks t
+       left join scrape_runs r on r.id = t.run_id
+      where t.params->>'parentTaskId' = $1
+      order by coalesce(r.started_ts_ms, t.created_ts_ms) asc`,
+    [task.id],
+  );
+
+  const runIds: string[] = [];
+  if (task.run_id) runIds.push(task.run_id);
+  for (const row of childTasksResult.rows) {
+    if (row.run_id && !runIds.includes(row.run_id)) runIds.push(row.run_id);
+  }
+
+  let runAccountRows: any[] = [];
+  if (runIds.length) {
+    const result = await pool.query(
+      `select ra.run_id, ra.account_id, ra.status, ra.started_ts_ms, ra.finished_ts_ms,
+              ra.content_found_count, ra.content_saved_count, ra.failed_content_count,
+              ra.error_code, ra.error_message,
+              r.started_ts_ms as run_started_ts_ms, r.status as run_status,
+              am.followers_count, am.following_count, am.posts_count,
+              am.content_count_in_window, am.new_content_count
+         from scrape_run_accounts ra
+         join scrape_runs r on r.id = ra.run_id
+         left join account_daily_metrics am
+           on am.run_id = ra.run_id and am.account_id = ra.account_id
+        where ra.run_id = any($1::text[])
+        order by r.started_ts_ms asc nulls first, ra.started_ts_ms asc nulls first`,
+      [runIds],
+    );
+    runAccountRows = result.rows;
+  }
+
+  const byAccount = new Map<string, any[]>();
+  for (const row of runAccountRows) {
+    const list = byAccount.get(row.account_id) || [];
+    list.push(row);
+    byAccount.set(row.account_id, list);
+  }
+
+  const accounts = accountsResult.rows.map((account: any) => {
+    const history = byAccount.get(account.id) || [];
+    const latest = history.length ? history[history.length - 1] : null;
+    const latestSuccess = [...history].reverse().find((row) => row.status === "success") || null;
+    let status = "pending";
+    if (!account.active) status = "disabled";
+    else if (!latest) status = "pending";
+    else if (latest.status === "running") status = "running";
+    else if (latest.status === "success") status = "success";
+    else if (latest.status === "partial_failed") status = "partial";
+    else status = "failed";
+
+    return {
+      id: account.id,
+      accountId: account.id,
+      handle: account.handle,
+      displayName: account.display_name,
+      profileUrl: account.profile_url,
+      platformCode: account.platform_code,
+      status,
+      latestRunId: latest?.run_id || null,
+      latestRunStatus: latest?.run_status || null,
+      latestRunStartedAt: iso(latest?.run_started_ts_ms),
+      latestSuccessRunId: latestSuccess?.run_id || null,
+      isNew: !latest,
+      startedAt: iso(latest?.started_ts_ms),
+      finishedAt: iso(latest?.finished_ts_ms),
+      contentFoundCount: Number(latestSuccess?.content_found_count || 0),
+      contentSavedCount: Number(latestSuccess?.content_saved_count || 0),
+      failedContentCount: Number(latest?.failed_content_count || 0),
+      followersCount: latestSuccess?.followers_count == null ? null : Number(latestSuccess.followers_count),
+      followingCount: latestSuccess?.following_count == null ? null : Number(latestSuccess.following_count),
+      postsCount: latestSuccess?.posts_count == null ? null : Number(latestSuccess.posts_count),
+      contentCountInWindow: latestSuccess?.content_count_in_window == null ? null : Number(latestSuccess.content_count_in_window),
+      newContentCount: latestSuccess?.new_content_count == null ? null : Number(latestSuccess.new_content_count),
+      errorCode: status === "failed" || status === "partial" ? latest?.error_code || null : null,
+      errorMessage: status === "failed" || status === "partial" ? latest?.error_message || null : null,
+    };
+  });
+
+  const active = accounts.filter((account: any) => account.status !== "disabled");
+  const coverage = {
+    total: active.length,
+    success: active.filter((account: any) => account.status === "success").length,
+    failed: active.filter((account: any) => account.status === "failed" || account.status === "partial").length,
+    newAccounts: active.filter((account: any) => account.status === "pending").length,
+    running: active.filter((account: any) => account.status === "running").length,
+    zeroContent: active.filter((account: any) => account.status === "success" && Number(account.contentCountInWindow || 0) === 0).length,
+    disabled: accounts.length - active.length,
+  };
+
+  const authoritativeRuns = new Map<string, string>();
+  for (const account of accounts) {
+    if (account.latestSuccessRunId) authoritativeRuns.set(account.accountId, account.latestSuccessRunId);
+  }
+
+  let contents: any[] = [];
+  if (runIds.length) {
+    const contentsResult = await pool.query(
+      `select c.id, c.external_content_id, c.url, c.content_type, c.title,
+              c.content_summary, c.publish_ts_ms,
+              m.play_count, m.like_count, m.comment_count, m.share_count,
+              m.collect_count, m.read_count, m.exposure_count, m.error_message,
+              c.account_id, m.run_id, a.handle as account_handle
+         from content_daily_metrics m
+         join social_contents c on c.id = m.content_id
+         join social_accounts a on a.id = c.account_id
+        where m.run_id = any($1::text[])
+        order by c.publish_ts_ms desc nulls last`,
+      [runIds],
+    );
+    contents = contentsResult.rows
+      .filter((row: any) => authoritativeRuns.get(row.account_id) === row.run_id)
+      .map((row: any) => ({
+        id: row.id,
+        externalContentId: row.external_content_id,
+        url: row.url,
+        contentType: row.content_type,
+        title: row.title,
+        summary: row.content_summary,
+        publishTime: iso(row.publish_ts_ms),
+        playCount: row.play_count == null ? null : Number(row.play_count),
+        likeCount: row.like_count == null ? null : Number(row.like_count),
+        commentCount: row.comment_count == null ? null : Number(row.comment_count),
+        shareCount: row.share_count == null ? null : Number(row.share_count),
+        collectCount: row.collect_count == null ? null : Number(row.collect_count),
+        readCount: row.read_count == null ? null : Number(row.read_count),
+        exposureCount: row.exposure_count == null ? null : Number(row.exposure_count),
+        errorMessage: row.error_message,
+        accountId: row.account_id,
+        accountHandle: row.account_handle,
+      }));
+  }
+
+  const childTasks = childTasksResult.rows.map((row: any) => ({
+    kind: row.task_kind || "backfill",
+    accountCount: Array.isArray(row.account_ids) ? row.account_ids.length : 0,
+    plannedAccounts: Number(row.total_accounts || 0),
+    successAccounts: Number(row.success_accounts || 0),
+    failedAccounts: Number(row.failed_accounts || 0),
+    contentMetricCount: Number(row.content_metric_count || 0),
+    id: row.id,
+    status: row.status,
+    runId: row.run_id,
+    runStatus: row.run_status,
+    runStartedAt: iso(row.started_ts_ms),
+    runFinishedAt: iso(row.finished_ts_ms),
+  }));
+
+  return { accounts, contents, coverage, childTasks };
+}
+
 async function taskDetail(pool: any, id: string): Promise<Json | null> {
   const taskResult = await pool.query(`${taskSelect} where t.id = $1`, [id]);
   if (!taskResult.rows.length) return null;
-  const task = taskRow(taskResult.rows[0]);
-  if (!task.runId) return { task, run: null, accounts: [], contents: [] };
+  const rawTask = taskResult.rows[0];
+  const task = taskRow(rawTask);
+  const coverageData = await loadTaskCoverage(pool, rawTask);
 
-  const runResult = await pool.query(
-    `select id, status, trigger_type, window_since_ts_ms, window_until_ts_ms,
-            task_date_key, started_ts_ms, finished_ts_ms,
-            raw_record_count, account_metric_count, content_metric_count,
-            total_accounts, success_accounts, failed_accounts,
-            total_contents, success_contents, failed_contents,
-            error_code, error_message
-       from scrape_runs where id = $1`,
-    [task.runId],
-  );
-  const accountsResult = await pool.query(
-    `select ra.id, ra.status, ra.started_ts_ms, ra.finished_ts_ms,
-            ra.content_found_count, ra.content_saved_count, ra.failed_content_count,
-            ra.error_code, ra.error_message,
-            a.id as account_id, a.handle, a.display_name, a.profile_url,
-            p.code as platform_code,
-            am.followers_count, am.following_count, am.posts_count,
-            am.content_count_in_window, am.new_content_count
-       from scrape_run_accounts ra
-       join social_accounts a on a.id = ra.account_id
-       join platforms p on p.id = a.platform_id
-       left join account_daily_metrics am
-         on am.run_id = ra.run_id and am.account_id = ra.account_id
-      where ra.run_id = $1
-      order by a.handle`,
-    [task.runId],
-  );
-  const contentsResult = await pool.query(
-    `select c.id, c.external_content_id, c.url, c.content_type, c.title,
-            c.content_summary, c.publish_ts_ms,
-            m.play_count, m.like_count, m.comment_count, m.share_count,
-            m.collect_count, m.read_count, m.exposure_count, m.error_message,
-            c.account_id, a.handle as account_handle
-       from content_daily_metrics m
-       join social_contents c on c.id = m.content_id
-       join social_accounts a on a.id = c.account_id
-      where m.run_id = $1
-      order by c.publish_ts_ms desc nulls last`,
-    [task.runId],
-  );
+  let run: Json | null = null;
+  if (task.runId) {
+    const runResult = await pool.query(
+      `select id, status, trigger_type, window_since_ts_ms, window_until_ts_ms,
+              task_date_key, started_ts_ms, finished_ts_ms,
+              raw_record_count, account_metric_count, content_metric_count,
+              total_accounts, success_accounts, failed_accounts,
+              total_contents, success_contents, failed_contents,
+              error_code, error_message
+         from scrape_runs where id = $1`,
+      [task.runId],
+    );
+    const row = runResult.rows[0];
+    if (row) {
+      run = {
+        id: row.id,
+        status: row.status,
+        triggerType: row.trigger_type,
+        windowSince: iso(row.window_since_ts_ms),
+        windowUntil: iso(row.window_until_ts_ms),
+        startedAt: iso(row.started_ts_ms),
+        finishedAt: iso(row.finished_ts_ms),
+        rawRecordCount: Number(row.raw_record_count || 0),
+        accountMetricCount: Number(row.account_metric_count || 0),
+        contentMetricCount: Number(row.content_metric_count || 0),
+        totalAccounts: Number(row.total_accounts || 0),
+        successAccounts: Number(row.success_accounts || 0),
+        failedAccounts: Number(row.failed_accounts || 0),
+        totalContents: Number(row.total_contents || 0),
+        successContents: Number(row.success_contents || 0),
+        failedContents: Number(row.failed_contents || 0),
+        errorCode: row.error_code,
+        errorMessage: row.error_message,
+      };
+    }
+  }
 
-  const run = runResult.rows[0] || null;
   return {
     task,
-    run: run ? {
-      id: run.id,
-      status: run.status,
-      triggerType: run.trigger_type,
-      windowSince: iso(run.window_since_ts_ms),
-      windowUntil: iso(run.window_until_ts_ms),
-      startedAt: iso(run.started_ts_ms),
-      finishedAt: iso(run.finished_ts_ms),
-      rawRecordCount: Number(run.raw_record_count || 0),
-      accountMetricCount: Number(run.account_metric_count || 0),
-      contentMetricCount: Number(run.content_metric_count || 0),
-      totalAccounts: Number(run.total_accounts || 0),
-      successAccounts: Number(run.success_accounts || 0),
-      failedAccounts: Number(run.failed_accounts || 0),
-      totalContents: Number(run.total_contents || 0),
-      successContents: Number(run.success_contents || 0),
-      failedContents: Number(run.failed_contents || 0),
-      errorCode: run.error_code,
-      errorMessage: run.error_message,
-    } : null,
-    accounts: accountsResult.rows.map((row: any) => ({
-      id: row.id,
-      accountId: row.account_id,
-      handle: row.handle,
-      displayName: row.display_name,
-      profileUrl: row.profile_url,
-      platformCode: row.platform_code,
-      status: row.status,
-      startedAt: iso(row.started_ts_ms),
-      finishedAt: iso(row.finished_ts_ms),
-      contentFoundCount: Number(row.content_found_count || 0),
-      contentSavedCount: Number(row.content_saved_count || 0),
-      failedContentCount: Number(row.failed_content_count || 0),
-      followersCount: row.followers_count == null ? null : Number(row.followers_count),
-      followingCount: row.following_count == null ? null : Number(row.following_count),
-      postsCount: row.posts_count == null ? null : Number(row.posts_count),
-      contentCountInWindow: row.content_count_in_window == null ? null : Number(row.content_count_in_window),
-      newContentCount: row.new_content_count == null ? null : Number(row.new_content_count),
-      errorCode: row.error_code,
-      errorMessage: row.error_message,
-    })),
-    contents: contentsResult.rows.map((row: any) => ({
-      id: row.id,
-      externalContentId: row.external_content_id,
-      url: row.url,
-      contentType: row.content_type,
-      title: row.title,
-      summary: row.content_summary,
-      publishTime: iso(row.publish_ts_ms),
-      playCount: row.play_count == null ? null : Number(row.play_count),
-      likeCount: row.like_count == null ? null : Number(row.like_count),
-      commentCount: row.comment_count == null ? null : Number(row.comment_count),
-      shareCount: row.share_count == null ? null : Number(row.share_count),
-      collectCount: row.collect_count == null ? null : Number(row.collect_count),
-      readCount: row.read_count == null ? null : Number(row.read_count),
-      exposureCount: row.exposure_count == null ? null : Number(row.exposure_count),
-      errorMessage: row.error_message,
-      accountId: row.account_id,
-      accountHandle: row.account_handle,
-    })),
+    run,
+    accounts: coverageData.accounts,
+    contents: coverageData.contents,
+    coverage: coverageData.coverage,
+    childTasks: coverageData.childTasks,
   };
 }
 
@@ -551,6 +672,64 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     if (method === "GET" && taskMatch) {
       const detail = await taskDetail(handle.pool, decodeURIComponent(taskMatch[1]));
       return detail ? json(200, detail) : fail(404, "任务不存在");
+    }
+    const taskRerunMatch = path.match(/^\/api\/tasks\/([^/]+)\/rerun$/);
+    if (method === "POST" && taskRerunMatch) {
+      const parentId = decodeURIComponent(taskRerunMatch[1]);
+      const parentResult = await handle.pool.query("select * from scrape_tasks where id = $1", [parentId]);
+      if (!parentResult.rows.length) return fail(404, "任务不存在");
+      const parent = parentResult.rows[0];
+      if (parent.params?.parentTaskId) return fail(409, "请从主任务发起补跑");
+      const body = await readJson(request);
+      const mode = text(body.mode);
+      if (!["failed", "new", "selected"].includes(mode)) return fail(400, "mode 必须是 failed、new 或 selected");
+
+      const busy = await handle.pool.query(
+        "select id from scrape_tasks where params->>'parentTaskId' = $1 and status in ('pending','running') limit 1",
+        [parentId],
+      );
+      if (busy.rows.length) return fail(409, "已有补跑任务正在等待或执行");
+
+      const coverageData = await loadTaskCoverage(handle.pool, parent);
+      let targets: any[] = [];
+      if (mode === "failed") {
+        targets = coverageData.accounts.filter((account: any) => account.status === "failed" || account.status === "partial");
+      } else if (mode === "new") {
+        targets = coverageData.accounts.filter((account: any) => account.status === "pending");
+      } else {
+        const requested = Array.isArray(body.accountIds)
+          ? [...new Set(body.accountIds.map((value: unknown) => String(value)).filter(Boolean))]
+          : [];
+        if (!requested.length) return fail(400, "请选择要重跑的账号");
+        const accountMap = new Map(coverageData.accounts.map((account: any) => [account.accountId, account]));
+        targets = requested.map((accountId: string) => accountMap.get(accountId)).filter(Boolean);
+        if (targets.length !== requested.length) return fail(400, "包含不属于该任务的账号");
+        if (targets.some((account: any) => account.status === "disabled")) return fail(409, "禁用账号不能重跑");
+      }
+
+      if (!targets.length) {
+        return fail(409, mode === "failed" ? "没有失败账号需要重试" : mode === "new" ? "没有新增账号需要补数据" : "没有可重跑的账号");
+      }
+
+      const taskKind = mode === "failed" ? "retry_failed" : mode === "new" ? "backfill_new" : "manual_rerun";
+      const childId = prefixedId("task");
+      const now = Date.now();
+      const childParams = {
+        ...(parent.params || {}),
+        accountIds: targets.map((account: any) => account.accountId),
+        parentTaskId: parentId,
+        taskKind,
+      };
+      await handle.pool.query(
+        `insert into scrape_tasks(
+           id, platform_id, category_id, account_type, params, priority, status,
+           scheduled_at_ms, lease_owner, lease_until_ms, attempts, run_id, last_error,
+           created_ts_ms, updated_ts_ms
+         ) values ($1, $2, $3, $4, $5::jsonb, $6, 'pending', $7, null, null, 0, null, null, $8, $8)`,
+        [childId, parent.platform_id, parent.category_id, parent.account_type, JSON.stringify(childParams), Number(parent.priority || 100), now, now],
+      );
+      const created = await handle.pool.query(`${taskSelect} where t.id = $1`, [childId]);
+      return json(201, { task: taskRow(created.rows[0]), accountCount: targets.length, mode });
     }
     const taskRetryMatch = path.match(/^\/api\/tasks\/([^/]+)\/retry$/);
     if (method === "POST" && taskRetryMatch) {

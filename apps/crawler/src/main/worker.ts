@@ -64,6 +64,9 @@ async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<Re
   let window = taskWindow(params);
   const limit = Number(params.limit || 0);
   const account = String(params.account || "").trim() || undefined;
+  const accountIds = Array.isArray(params.accountIds)
+    ? params.accountIds.map((value: unknown) => String(value)).filter(Boolean)
+    : undefined;
   const definition = getPlatformDefinition(task.platformCode);
   const scraper = await definition.load();
   const accounts = await loadPlatformAccounts({
@@ -71,6 +74,7 @@ async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<Re
     platformCode: task.platformCode,
     accountType,
     account,
+    accountIds,
     limit: 0,
   });
   if (!accounts.length) {

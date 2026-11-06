@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   ArrowLeft,
@@ -9,13 +9,14 @@ import {
   ExternalLink,
   FileText,
   Info,
+  RefreshCw,
   UsersRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 
-import { getTask } from '@/lib/api'
-import type { TaskAccount, TaskContent } from '@/lib/types'
+import { getTask, rerunTask } from '@/lib/api'
+import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import { PageHeader } from '@/components/page-header'
 import { PlatformBadge } from '@/components/platform-badge'
@@ -29,6 +30,10 @@ import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Checkbox } from '@/components/ui/checkbox'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetailPage,
@@ -43,61 +48,237 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-function AccountTable({ accounts }: { accounts: TaskAccount[] }) {
+const coverageMeta: Record<string, { label: string; className: string; dot: string }> = {
+  success: { label: '成功', className: 'bg-emerald-50 text-emerald-800 ring-emerald-200/80', dot: 'bg-emerald-500' },
+  failed: { label: '失败', className: 'bg-rose-50 text-rose-800 ring-rose-200/80', dot: 'bg-rose-500' },
+  partial: { label: '部分失败', className: 'bg-orange-50 text-orange-800 ring-orange-200/80', dot: 'bg-orange-500' },
+  pending: { label: '新增待补', className: 'bg-sky-50 text-sky-800 ring-sky-200/80', dot: 'bg-sky-500' },
+  running: { label: '执行中', className: 'bg-sky-50 text-sky-800 ring-sky-200/80', dot: 'bg-sky-500 animate-soft-pulse' },
+  disabled: { label: '已禁用', className: 'bg-muted text-muted-foreground ring-border', dot: 'bg-muted-foreground/50' },
+}
+
+function CoverageStatus({ account }: { account: TaskAccount }) {
+  const isZero = account.status === 'success' && Number(account.contentCountInWindow || 0) === 0
+  const meta = isZero
+    ? { label: '成功但 0 条', className: 'bg-amber-50 text-amber-800 ring-amber-200/80', dot: 'bg-amber-500' }
+    : coverageMeta[account.status] || coverageMeta.pending
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset', meta.className)}>
+      <span className={cn('size-1.5 rounded-full', meta.dot)} />
+      {meta.label}
+    </span>
+  )
+}
+
+type ConfirmAction = {
+  mode: 'failed' | 'new' | 'selected'
+  ids: string[]
+  title: string
+  description: string
+}
+
+function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[]; coverage: TaskDetailResponse['coverage']; taskId: string }) {
+  const queryClient = useQueryClient()
+  const [filter, setFilter] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirm, setConfirm] = useState<ConfirmAction | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const failed = accounts.filter((a) => a.status === 'failed' || a.status === 'partial')
+  const newAccounts = accounts.filter((a) => a.status === 'pending' && a.isNew)
+  const zero = accounts.filter((a) => a.status === 'success' && Number(a.contentCountInWindow || 0) === 0)
+  const success = accounts.filter((a) => a.status === 'success')
+  const disabled = accounts.filter((a) => a.status === 'disabled')
+  const effectiveFilter = filter || (failed.length + newAccounts.length > 0 ? 'action' : 'all')
+  const filtered = useMemo(() => {
+    if (effectiveFilter === 'action') return accounts.filter((a) => a.status === 'failed' || a.status === 'partial' || (a.status === 'pending' && a.isNew));
+    if (effectiveFilter === 'failed') return failed;
+    if (effectiveFilter === 'new') return newAccounts;
+    if (effectiveFilter === 'zero') return zero;
+    if (effectiveFilter === 'success') return success;
+    if (effectiveFilter === 'disabled') return disabled;
+    return accounts;
+  }, [accounts, effectiveFilter, failed, newAccounts, zero, success, disabled])
+  const selectable = filtered.filter((a) => a.status !== 'disabled')
+  const allSelected = selectable.length > 0 && selectable.every((a) => selected.has(a.accountId))
+
+  const toggle = (id: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (checked) next.add(id); else next.delete(id)
+      return next
+    })
+  }
+  const toggleAll = (checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current)
+      for (const account of selectable) {
+        if (checked) next.add(account.accountId); else next.delete(account.accountId)
+      }
+      return next
+    })
+  }
+  const ask = (mode: 'failed' | 'new' | 'selected', ids: string[]) => {
+    if (!ids.length) return
+    setConfirm({
+      mode,
+      ids,
+      title: mode === 'failed' ? '重试失败账号' : mode === 'new' ? '补新增账号' : '重跑选中账号',
+      description: mode === 'selected'
+        ? '即使这些账号之前成功也会重新执行；已禁用账号不会被处理。'
+        : '将沿用当前任务的时间范围，只处理目标账号；已成功账号不会被重复执行。',
+    })
+  }
+  const submit = async () => {
+    if (!confirm) return
+    setSubmitting(true)
+    try {
+      await rerunTask(taskId, confirm.mode, confirm.ids)
+      toast.success('已创建补跑任务')
+      setSelected(new Set())
+      setConfirm(null)
+      await queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '创建补跑任务失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (!accounts.length) {
     return <EmptyState icon={UsersRound} title="没有账号数据" description="任务尚未执行，或本次没有选中账号。" />
   }
+
+  const filters = [
+    { key: 'all', label: '全部', count: accounts.length },
+    { key: 'action', label: '需处理', count: failed.length + newAccounts.length },
+    { key: 'failed', label: '失败', count: failed.length },
+    { key: 'new', label: '新增待补', count: newAccounts.length },
+    { key: 'zero', label: '成功但 0 条', count: zero.length },
+    { key: 'success', label: '成功', count: success.length },
+    { key: 'disabled', label: '已禁用', count: disabled.length },
+  ]
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
-      <Table className="min-w-[980px]">
-        <TableHeader>
-          <TableRow className="bg-muted/40 hover:bg-muted/40">
-            <TableHead>账号</TableHead>
-            <TableHead>状态</TableHead>
-            <TableHead className="text-right">粉丝</TableHead>
-            <TableHead className="text-right">关注</TableHead>
-            <TableHead className="text-right">帖子</TableHead>
-            <TableHead className="text-right">抓到</TableHead>
-            <TableHead className="text-right">保存</TableHead>
-            <TableHead>错误</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {accounts.map((account) => (
-            <TableRow key={account.id}>
-              <TableCell>
-                <div className="flex flex-col">
-                  <a
-                    href={account.profileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-sm font-medium hover:text-primary"
-                  >
-                    {account.handle}
-                    <ExternalLink className="size-3 text-muted-foreground" />
-                  </a>
-                  <span className="mt-0.5 text-[11px] text-muted-foreground">{account.displayName || '—'}</span>
-                </div>
-              </TableCell>
-              <TableCell><StatusBadge status={account.status} /></TableCell>
-              <TableCell className="text-right tabular-nums">{formatNumber(account.followersCount)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatNumber(account.followingCount)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatNumber(account.postsCount)}</TableCell>
-              <TableCell className="text-right tabular-nums">{account.contentFoundCount}</TableCell>
-              <TableCell className="text-right tabular-nums">{account.contentSavedCount}</TableCell>
-              <TableCell>
-                {account.errorMessage ? (
-                  <span className="line-clamp-2 max-w-[220px] text-[11px] text-rose-700" title={account.errorMessage}>
-                    {account.errorMessage}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">—</span>
-                )}
-              </TableCell>
+    <div className="space-y-3">
+      <div className="rounded-xl border border-border/80 bg-muted/25 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">账号覆盖 {coverage.success} / {coverage.total}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              成功 {coverage.success} · 失败 {coverage.failed} · 新增待补 {coverage.newAccounts} · 已禁用 {coverage.disabled}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {failed.length > 0 ? <Button size="sm" variant="outline" onClick={() => ask('failed', failed.map((a) => a.accountId))}><RefreshCw className="size-3.5" />重试失败 {failed.length}</Button> : null}
+            {newAccounts.length > 0 ? <Button size="sm" onClick={() => ask('new', newAccounts.map((a) => a.accountId))}><UsersRound className="size-3.5" />补新增 {newAccounts.length}</Button> : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {filters.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setFilter(item.key)}
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+              effectiveFilter === item.key ? 'border-primary/30 bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
+            )}
+          >
+            {item.label} {item.count}
+          </button>
+        ))}
+      </div>
+
+      {selected.size > 0 ? (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
+          <span>已选 {selected.size} 个账号</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>取消选择</Button>
+            <Button size="sm" onClick={() => ask('selected', [...selected])}>重跑选中账号</Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
+        <Table className="min-w-[1080px]">
+          <TableHeader>
+            <TableRow className="bg-muted/40 hover:bg-muted/40">
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={allSelected ? true : selectable.some((a) => selected.has(a.accountId)) ? 'indeterminate' : false}
+                  onCheckedChange={(value) => toggleAll(value === true)}
+                  aria-label="选择当前筛选账号"
+                />
+              </TableHead>
+              <TableHead>账号</TableHead>
+              <TableHead>状态</TableHead>
+              <TableHead className="text-right">窗口内容</TableHead>
+              <TableHead className="text-right">粉丝</TableHead>
+              <TableHead className="text-right">帖子数</TableHead>
+              <TableHead>最近执行</TableHead>
+              <TableHead>错误</TableHead>
+              <TableHead className="text-right">操作</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((account) => (
+              <TableRow key={account.accountId} className={account.status === 'disabled' ? 'opacity-55' : undefined}>
+                <TableCell>
+                  <Checkbox
+                    checked={selected.has(account.accountId)}
+                    disabled={account.status === 'disabled'}
+                    onCheckedChange={(value) => toggle(account.accountId, value === true)}
+                    aria-label={`选择 ${account.handle}`}
+                  />
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-col">
+                    <a href={account.profileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium hover:text-primary">
+                      {account.handle}
+                      <ExternalLink className="size-3 text-muted-foreground" />
+                    </a>
+                    <span className="mt-0.5 text-[11px] text-muted-foreground">{account.displayName || '—'}</span>
+                  </div>
+                </TableCell>
+                <TableCell><CoverageStatus account={account} /></TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(account.contentCountInWindow)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(account.followersCount)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(account.postsCount)}</TableCell>
+                <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(account.latestRunStartedAt)}</TableCell>
+                <TableCell>
+                  {account.errorMessage ? (
+                    <span className="line-clamp-2 max-w-[220px] text-[11px] text-rose-700" title={account.errorMessage}>{account.errorMessage}</span>
+                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                </TableCell>
+                <TableCell className="text-right">
+                  {account.status !== 'disabled' ? (
+                    <Button size="sm" variant="ghost" onClick={() => ask('selected', [account.accountId])}>重跑</Button>
+                  ) : <span className="text-[11px] text-muted-foreground">不可操作</span>}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => { if (!open) setConfirm(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm?.title}？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将处理 {confirm?.ids.length || 0} 个账号。{confirm?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={submit} disabled={submitting}>{submitting ? '创建中…' : '确认'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -244,7 +425,7 @@ function TaskDetailPage() {
     )
   }
 
-  const { task, run, accounts, contents } = query.data
+  const { task, run, accounts, contents, coverage, childTasks } = query.data
   const backDate = run?.startedAt
     ? dateKeyFromDate(new Date(run.startedAt))
     : task.runStartedAt
@@ -289,7 +470,7 @@ function TaskDetailPage() {
             <Metric label="抓取范围（UTC+8）" value={formatWindow(task.windowSince, task.windowUntil)} />
             <Metric label="实际开始" value={formatFullDateTime(run?.startedAt ?? task.runStartedAt)} />
             <Metric label="实际结束" value={run?.finishedAt ? formatFullDateTime(run.finishedAt) : task.status === 'running' ? '进行中' : '—'} />
-            <Metric label="账号（成功/失败/总数）" value={`${task.successAccounts} / ${task.failedAccounts} / ${task.plannedAccounts || task.totalAccounts}`} />
+            <Metric label="账号覆盖（成功/总数）" value={`${coverage.success} / ${coverage.total}`} />
           </div>
 
           {run?.errorMessage || task.lastError ? (
@@ -316,10 +497,11 @@ function TaskDetailPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="accounts"><AccountTable accounts={accounts} /></TabsContent>
+        <TabsContent value="accounts"><AccountTable accounts={accounts} coverage={coverage} taskId={task.id} /></TabsContent>
         <TabsContent value="contents"><ContentTable contents={contents} /></TabsContent>
         <TabsContent value="run">
           {run ? (
+            <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">执行结果</CardTitle></CardHeader>
@@ -349,6 +531,38 @@ function TaskDetailPage() {
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">抓取结束</span><span className="text-right tabular-nums">{formatDateTime(run.windowUntil)}</span></div>
                 </CardContent>
               </Card>
+            </div>
+            {childTasks.length ? (
+              <Card>
+                <CardHeader className="pb-3"><CardTitle className="text-sm">补跑记录</CardTitle></CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableHead>类型</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead className="text-right">账号</TableHead>
+                        <TableHead className="text-right">内容</TableHead>
+                        <TableHead>开始</TableHead>
+                        <TableHead>结束</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {childTasks.map((child) => (
+                        <TableRow key={child.id}>
+                          <TableCell className="text-xs">{child.kind === 'retry_failed' ? '失败重试' : child.kind === 'backfill_new' ? '新增补数据' : '手动重跑'}</TableCell>
+                          <TableCell><StatusBadge status={child.status} runStatus={child.runStatus} /></TableCell>
+                          <TableCell className="text-right tabular-nums">{child.successAccounts}/{child.accountCount || child.plannedAccounts}</TableCell>
+                          <TableCell className="text-right tabular-nums">{child.contentMetricCount}</TableCell>
+                          <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runStartedAt)}</TableCell>
+                          <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runFinishedAt)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            ) : null}
             </div>
           ) : (
             <EmptyState icon={CalendarClock} title="尚未执行" description="任务执行后会显示运行结果和错误详情。" />

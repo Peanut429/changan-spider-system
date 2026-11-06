@@ -93,6 +93,11 @@ export type TaskAccount = {
   newContentCount: number | null
   errorCode: string | null
   errorMessage: string | null
+  latestRunId: string | null
+  latestRunStatus: string | null
+  latestRunStartedAt: string | null
+  latestSuccessRunId: string | null
+  isNew: boolean
 }
 
 export type TaskContent = {
@@ -115,11 +120,38 @@ export type TaskContent = {
   accountHandle: string
 }
 
+export type TaskCoverage = {
+  total: number
+  success: number
+  failed: number
+  newAccounts: number
+  running: number
+  zeroContent: number
+  disabled: number
+}
+
+export type TaskChildRun = {
+  id: string
+  kind: string
+  accountCount: number
+  plannedAccounts: number
+  successAccounts: number
+  failedAccounts: number
+  contentMetricCount: number
+  status: string
+  runId: string | null
+  runStatus: string | null
+  runStartedAt: string | null
+  runFinishedAt: string | null
+}
+
 export type TaskDetailResponse = {
   task: Task
   run: Run | null
   accounts: TaskAccount[]
   contents: TaskContent[]
+  coverage: TaskCoverage
+  childTasks: TaskChildRun[]
 }
 
 export type Account = {
