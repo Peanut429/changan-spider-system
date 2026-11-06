@@ -107,7 +107,7 @@ export function TaskDialog({
             <Label>平台</Label>
             <Select value={platformId} onValueChange={setPlatformId}>
               <SelectTrigger className="w-full"><SelectValue placeholder="选择平台" /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="cx-portal">
                 {platforms.map((platform) => (
                   <SelectItem key={platform.id} value={platform.id}>{platform.name}</SelectItem>
                 ))}
@@ -119,7 +119,7 @@ export function TaskDialog({
             <Label>账号类型</Label>
             <Select value={accountType} onValueChange={setAccountType}>
               <SelectTrigger className="w-full"><SelectValue placeholder="选择账号类型" /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="cx-portal">
                 {accountTypes.map((type) => (
                   <SelectItem key={type} value={type}>{type}</SelectItem>
                 ))}
