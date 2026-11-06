@@ -530,8 +530,7 @@ function TaskDetailPage() {
           {run ? (
             <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="cx-sheen">
-<Card>
+              <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">执行结果</CardTitle></CardHeader>
                 <CardContent className="grid gap-2 text-xs">
                   <div className="flex justify-between"><span className="text-muted-foreground">执行状态</span><StatusBadge status={run.status} /></div>
@@ -542,9 +541,7 @@ function TaskDetailPage() {
                   <div className="flex justify-between"><span className="text-muted-foreground">内容成功/失败</span><span>{run.successContents} / {run.failedContents}</span></div>
                 </CardContent>
               </Card>
-              </div>
-              <div className="cx-sheen">
-<Card>
+              <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">数据量</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-2 gap-3 text-xs">
                   <Metric label="原始数据" value={formatNumber(run.rawRecordCount)} />
@@ -553,9 +550,7 @@ function TaskDetailPage() {
                   <Metric label="内容总数" value={formatNumber(run.totalContents)} />
                 </CardContent>
               </Card>
-              </div>
-              <div className="cx-sheen">
-<Card>
+              <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">抓取设置</CardTitle></CardHeader>
                 <CardContent className="space-y-2 text-xs">
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">执行日期</span><span>{formatFullDate(run.startedAt)}</span></div>
@@ -563,7 +558,6 @@ function TaskDetailPage() {
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">抓取结束</span><span className="text-right tabular-nums">{formatDateTime(run.windowUntil)}</span></div>
                 </CardContent>
               </Card>
-              </div>
             </div>
             {childTasks.length ? (
               <Card>

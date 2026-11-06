@@ -724,49 +724,6 @@
   color: #ffb3a8 !important;
 }
 
-/* ---------- hover sheen ---------- */
-
-.cx-sheen {
-  position: relative;
-  overflow: hidden;
-  border-radius: 10px;
-  /* light: a pale mint wash on paper */
-  --cx-sheen: rgba(126, 205, 172, 0.46);
-}
-
-:root[data-theme='dark'] .cx-sheen {
-  /* dark: brighter mint so it lifts off the panel */
-  --cx-sheen: rgba(168, 255, 220, 0.26);
-}
-
-.cx-sheen::after {
-  content: '';
-  position: absolute;
-  inset: -30% -60%;
-  pointer-events: none;
-  background: linear-gradient(104deg, transparent 42%, var(--cx-sheen) 50%, transparent 58%);
-  transform: translateX(-45%);
-  opacity: 0;
-}
-
-.cx-sheen:hover::after {
-  animation: cx-sheen 650ms cubic-bezier(0.33, 0, 0.2, 1);
-}
-
-@keyframes cx-sheen {
-  0% {
-    transform: translateX(-45%);
-    opacity: 0;
-  }
-  18% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(45%);
-    opacity: 0;
-  }
-}
-
 /* ---------- toolbar ---------- */
 
 .cx-toolbar {
