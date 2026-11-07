@@ -7,6 +7,7 @@ export type Platform = {
 
 export type TaskSummary = {
   pending: number
+  paused: number
   running: number
   success: number
   failed: number
@@ -24,7 +25,7 @@ export type Task = {
   accountType: string | null
   params: Record<string, unknown>
   priority: number
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | string
+  status: 'pending' | 'paused' | 'running' | 'success' | 'failed' | 'cancelled' | string
   scheduledAt: string | null
   attempts: number
   runId: string | null
@@ -172,7 +173,9 @@ export type Account = {
   profileUrl: string
   externalAccountId: string | null
   active: boolean
+  /** Primary/legacy type. New code reads `accountTypes`. */
   accountType: string | null
+  accountTypes: string[]
   createdAt: string | null
   updatedAt: string | null
 }
@@ -191,7 +194,7 @@ export type AccountInput = {
   handle: string
   displayName: string
   profileUrl: string
-  accountType: string
+  accountTypes: string[]
   active: boolean
 }
 

@@ -50,6 +50,7 @@
   --cx-ok: #17996a;
   --cx-warn: #9a6a12;
   --cx-danger: #bf3626;
+  --cx-run: #1f6feb;
 
   --cx-surface-bg: linear-gradient(180deg, rgba(15, 122, 85, 0.025), transparent 42%), #ffffff;
   --cx-surface-shadow: 0 24px 44px -34px rgba(16, 24, 20, 0.45);
@@ -60,7 +61,8 @@
   --cx-mark-shadow: none;
   --cx-cell-idle: rgba(15, 122, 85, 0.13);
   --cx-cell-ok: linear-gradient(180deg, #17996a, #0d7a55);
-  --cx-cell-new: rgba(191, 54, 38, 0.4);
+  --cx-cell-wait: rgba(154, 106, 18, 0.35);
+  --cx-cell-run: rgba(31, 111, 235, 0.6);
   --cx-sweep-hi: rgba(15, 122, 85, 0.35);
   --cx-sweep-lo: rgba(15, 122, 85, 0.08);
 
@@ -107,6 +109,7 @@
   --cx-ok: #5ef2b0;
   --cx-warn: #ffb86b;
   --cx-danger: #ff6b5a;
+  --cx-run: #5b9cff;
 
   --cx-surface-bg: linear-gradient(180deg, rgba(94, 242, 176, 0.03), transparent 42%), #0b1110;
   --cx-surface-shadow: 0 50px 90px -60px rgba(0, 0, 0, 0.9);
@@ -117,7 +120,8 @@
   --cx-mark-shadow: 0 0 8px currentColor;
   --cx-cell-idle: rgba(94, 242, 176, 0.1);
   --cx-cell-ok: linear-gradient(180deg, rgba(94, 242, 176, 0.9), rgba(94, 242, 176, 0.42));
-  --cx-cell-new: rgba(255, 184, 107, 0.55);
+  --cx-cell-wait: rgba(255, 184, 107, 0.5);
+  --cx-cell-run: rgba(91, 156, 255, 0.55);
   --cx-sweep-hi: rgba(94, 242, 176, 0.45);
   --cx-sweep-lo: rgba(94, 242, 176, 0.1);
 
@@ -190,6 +194,20 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+}
+
+/* Grouping is a view control, so it sits with the date instead of the tables. */
+.cx-groupby {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cx-groupby-label {
+  font-size: 11.5px;
+  color: var(--cx-ink-3);
+  white-space: nowrap;
 }
 
 /* ---------- sections ---------- */
@@ -374,6 +392,56 @@
   text-align: right;
 }
 
+/* ---------- grouped table ---------- */
+
+.cx-table tr.cx-group-row td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--cx-line-strong);
+  background: var(--cx-thead-bg);
+  color: var(--cx-ink-2);
+}
+
+.cx-group-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+  text-align: left;
+}
+
+.cx-group-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--cx-line-strong);
+  border-radius: 8px;
+  color: var(--cx-ink-2);
+}
+
+.cx-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cx-ink);
+}
+
+.cx-group-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cx-ink-3);
+}
+
+.cx-group-stats {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cx-ink-3);
+  white-space: nowrap;
+}
+
 /* Platform identity: a tinted tile keeps the brand mark legible on both skins. */
 .cx-plat-mark {
   display: inline-grid;
@@ -462,6 +530,14 @@
   color: var(--cx-danger);
 }
 
+.cx-cover-note [data-tone='run'] {
+  color: var(--cx-run);
+}
+
+.cx-cover-note [data-tone='wait'] {
+  color: var(--cx-warn);
+}
+
 .cx-cover-bar {
   display: flex;
   width: 100%;
@@ -487,8 +563,12 @@
   background: var(--cx-danger);
 }
 
-.cx-cover-bar i[data-state='new'] {
-  background: var(--cx-cell-new);
+.cx-cover-bar i[data-state='run'] {
+  background: var(--cx-cell-run);
+}
+
+.cx-cover-bar i[data-state='wait'] {
+  background: var(--cx-cell-wait);
 }
 
 /* One composited transform per row instead of 50–90 per cell. */
@@ -1202,6 +1282,24 @@
 
   .cx-table td[data-block='true']::before {
     content: none;
+  }
+
+  .cx-groupby-label {
+    display: none;
+  }
+
+  /* On phones a group reads as a small heading above its stack of cards. */
+  .cx-table tr.cx-group-row td {
+    display: block;
+    padding: 18px 2px 8px;
+    border-bottom: 0;
+    background: transparent;
+    text-align: left;
+  }
+
+  .cx-group-cell {
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--cx-line);
   }
 
   .cx-cells {

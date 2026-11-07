@@ -7,6 +7,13 @@ const dateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 })
 
+const timeKeyFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
 const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone: TIME_ZONE,
   month: '2-digit',
@@ -48,6 +55,11 @@ export function todayKey(): string {
 
 export function dateKeyFromDate(date: Date): string {
   return dateKeyFormatter.format(date)
+}
+
+/** HH:mm in the business time zone, for <input type="time">. */
+export function timeKeyFromDate(date: Date): string {
+  return timeKeyFormatter.format(date)
 }
 
 export function dateFromKey(key: string): Date {

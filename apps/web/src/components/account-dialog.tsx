@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { createAccount, updateAccount } from '@/lib/api'
 import type { Account, Platform } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -23,7 +24,7 @@ type FormState = {
   handle: string
   displayName: string
   profileUrl: string
-  accountType: string
+  accountTypes: string[]
   active: boolean
 }
 
@@ -32,7 +33,7 @@ const EMPTY_FORM: FormState = {
   handle: '',
   displayName: '',
   profileUrl: '',
-  accountType: '总部',
+  accountTypes: ['总部'],
   active: true,
 }
 
@@ -57,24 +58,39 @@ export function AccountDialog({
 
   useEffect(() => {
     if (!open) return
+    const fallback = accountTypes.includes('总部') ? ['总部'] : accountTypes[0] ? [accountTypes[0]] : []
     if (account) {
+      const currentTypes = account.accountTypes?.length
+        ? account.accountTypes
+        : account.accountType
+          ? [account.accountType]
+          : []
       setForm({
         platformId: account.platformId,
         handle: account.handle,
         displayName: account.displayName || '',
         profileUrl: account.profileUrl,
-        accountType: account.accountType || (accountTypes.includes('总部') ? '总部' : (accountTypes[0] || '')),
+        accountTypes: currentTypes.length ? currentTypes : fallback,
         active: account.active,
       })
     } else {
-      setForm({ ...EMPTY_FORM, platformId: platforms[0]?.id || '', accountType: accountTypes.includes('总部') ? '总部' : (accountTypes[0] || '') })
+      setForm({ ...EMPTY_FORM, platformId: platforms[0]?.id || '', accountTypes: fallback })
     }
   }, [open, account, platforms, accountTypes])
 
   const canSubmit = useMemo(
-    () => Boolean(form.platformId && form.handle.trim() && form.profileUrl.trim() && form.accountType && !saving),
+    () => Boolean(form.platformId && form.handle.trim() && form.profileUrl.trim() && form.accountTypes.length > 0 && !saving),
     [form, saving],
   )
+
+  const toggleType = (type: string) => {
+    setForm((current) => ({
+      ...current,
+      accountTypes: current.accountTypes.includes(type)
+        ? current.accountTypes.filter((item) => item !== type)
+        : [...current.accountTypes, type],
+    }))
+  }
 
   const submit = async () => {
     if (!canSubmit) return
@@ -85,7 +101,7 @@ export function AccountDialog({
         handle: form.handle.trim(),
         displayName: form.displayName.trim(),
         profileUrl: form.profileUrl.trim(),
-        accountType: form.accountType.trim(),
+        accountTypes: form.accountTypes,
         active: form.active,
       }
       if (editing && account) {
@@ -144,29 +160,39 @@ export function AccountDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label>账号类型</Label>
-              <Select
-                value={form.accountType || accountTypes[0] || ''}
-                onValueChange={(value) => setForm((current) => ({ ...current, accountType: value }))}
-              >
-                <SelectTrigger className="w-full"><SelectValue placeholder="选择账号类型" /></SelectTrigger>
-                <SelectContent className="cx-portal">
-                  {accountTypes.map((type) => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="account-display">显示名称</Label>
+              <Input
+                id="account-display"
+                value={form.displayName}
+                onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+                placeholder="可选，业务侧展示名"
+              />
             </div>
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="account-display">显示名称</Label>
-            <Input
-              id="account-display"
-              value={form.displayName}
-              onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
-              placeholder="可选，业务侧展示名"
-            />
+            <Label>账号类型</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {accountTypes.map((type) => {
+                const checked = form.accountTypes.includes(type)
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    className={cn('cx-chip', checked && 'cx-chip--on')}
+                    aria-pressed={checked}
+                    onClick={() => toggleType(type)}
+                  >
+                    {type}
+                  </button>
+                )
+              })}
+            </div>
+            <p className={cn('text-[11px]', form.accountTypes.length ? 'text-muted-foreground' : 'text-rose-600')}>
+              {form.accountTypes.length
+                ? '可多选。任务仍按单一类型创建；账号会同时进入它所属的每个类型的任务。'
+                : '请至少选择一个账号类型。'}
+            </p>
           </div>
 
           <div className="grid gap-2">

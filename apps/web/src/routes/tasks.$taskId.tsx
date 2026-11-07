@@ -174,7 +174,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
           <div>
             <p className="text-sm font-medium">账号覆盖 {coverage.success} / {coverage.total}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              成功 {coverage.success} · 失败 {coverage.failed} · 新增待补 {coverage.newAccounts} · 已禁用 {coverage.disabled}
+              成功 {coverage.success} · 失败 {coverage.failed} · 运行中 {coverage.running} · 新增待补 {coverage.newAccounts} · 已禁用 {coverage.disabled}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -276,7 +276,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
       </div>
 
       <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => { if (!open) setConfirm(null) }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="cx-portal">
           <AlertDialogHeader>
             <AlertDialogTitle>{confirm?.title}？</AlertDialogTitle>
             <AlertDialogDescription>
@@ -438,12 +438,14 @@ function TaskDetailPage() {
   }
 
   const { task, run, accounts, contents, coverage, childTasks } = query.data
-  const backDate = run?.startedAt
-    ? dateKeyFromDate(new Date(run.startedAt))
-    : task.runStartedAt
-      ? dateKeyFromDate(new Date(task.runStartedAt))
-      : task.scheduledAt
-        ? dateKeyFromDate(new Date(task.scheduledAt))
+  // The list groups tasks by their planned day, so go back there rather than to
+  // the day a late run happened to start.
+  const backDate = task.scheduledAt
+    ? dateKeyFromDate(new Date(task.scheduledAt))
+    : run?.startedAt
+      ? dateKeyFromDate(new Date(run.startedAt))
+      : task.runStartedAt
+        ? dateKeyFromDate(new Date(task.runStartedAt))
         : todayKey()
   return (
     <ConsolePage>

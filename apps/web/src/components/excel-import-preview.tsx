@@ -625,6 +625,9 @@ export function ExcelImportPreview({
                 </div>
               ) : null}
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              导入会为账号追加所选类型；已存在账号的其他类型不会被移除。
+            </p>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">

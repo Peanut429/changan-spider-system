@@ -33,6 +33,22 @@ export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
 })
 
+function AccountTypes({ account }: { account: Account }) {
+  const types = account.accountTypes?.length
+    ? account.accountTypes
+    : account.accountType
+      ? [account.accountType]
+      : []
+  if (!types.length) return <span className="text-muted-foreground">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((type) => (
+        <span key={type} className="cx-tag">{type}</span>
+      ))}
+    </div>
+  )
+}
+
 function AccountsPage() {
   const reduceMotion = useReducedMotion()
   const queryClient = useQueryClient()
@@ -231,7 +247,7 @@ function AccountsPage() {
                     <td data-label="平台">
                       <PlatformMark code={account.platformCode} name={account.platformName} />
                     </td>
-                    <td data-label="类型">{account.accountType || '—'}</td>
+                    <td data-label="类型"><AccountTypes account={account} /></td>
                     <td data-label="状态">
                       <span className="cx-switch">
                         <SquishSwitch

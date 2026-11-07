@@ -54,6 +54,15 @@ SOCIAL_BROWSER_EXECUTABLE
 TIKHUB_API_KEY   # 只有跑 Instagram 时需要
 ```
 
+YouTube 默认优先走 HTTP 接口（浏览器只用来拿登录态和频道首屏），接口失败会自动降级回纯浏览器页面抓取。
+需要强制某一种方式时设置 `YOUTUBE_HTTP_MODE`：
+
+```text
+YOUTUBE_HTTP_MODE=auto      # 默认：HTTP 优先，失败降级浏览器
+YOUTUBE_HTTP_MODE=http      # 只用 HTTP，失败直接报错
+YOUTUBE_HTTP_MODE=browser   # 只用原来的浏览器页面抓取
+```
+
 ## 启动
 
 在 monorepo 根目录：
@@ -95,3 +104,11 @@ pnpm typecheck
 pnpm test
 pnpm build:web
 ```
+
+## 部署
+
+Linux 服务器 + pm2 的完整步骤见 [DEPLOY.md](./DEPLOY.md)，配套文件：
+
+- `ecosystem.config.cjs`：pm2 进程定义（web cluster 2 实例、worker 单实例）
+- `deploy/nginx.conf`：nginx 反代示例
+- `deploy/deploy.sh`：拉代码 → 构建 → reload → 健康检查

@@ -4,6 +4,7 @@ import { MotionConfig } from 'motion/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { AppShell } from '@/components/app-shell'
+import { RouteNotFound } from '@/components/route-not-found'
 
 import appCss from '../styles.css?url'
 
@@ -31,11 +32,17 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootDocument,
+  // Unmatched URLs surface as a notFoundError on `__root__`; without this the
+  // router falls back to its bare `<p>Not Found</p>` and logs a dev warning.
+  notFoundComponent: RouteNotFound,
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  // `data-theme` is written to <html> by lib/theme.ts before React hydrates, so
+  // the first frame is already in the saved skin. The server cannot know that
+  // attribute, hence the one expected difference — not a hydration bug.
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

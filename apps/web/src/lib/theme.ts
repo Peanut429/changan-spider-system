@@ -18,7 +18,11 @@ function readInitial(): Theme {
 
 let current: Theme = readInitial()
 
-/** Paint the attribute as early as possible so the first frame is correct. */
+/**
+ * Paint the attribute as early as possible so the first frame is correct.
+ * This happens before React hydrates, which is why <html> in __root.tsx is
+ * marked suppressHydrationWarning: the server can't know the saved theme.
+ */
 if (typeof document !== 'undefined') {
   document.documentElement.dataset.theme = current
 }

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { LoaderCircle, Plus } from 'lucide-react'
+import { LoaderCircle, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { subDays } from 'date-fns'
 
-import { createTask } from '@/lib/api'
+import { createTask, updateTask } from '@/lib/api'
 import type { Platform, Task } from '@/lib/types'
-import { dateFromKey, dateKeyFromDate, todayKey } from '@/lib/format'
+import { dateFromKey, dateKeyFromDate, timeKeyFromDate, todayKey } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -25,14 +25,17 @@ export function TaskDialog({
   platforms,
   accountTypes,
   defaultDate,
-  onCreated,
+  task,
+  onSaved,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   platforms: Platform[]
   accountTypes: string[]
   defaultDate: string
-  onCreated: (task: Task) => void
+  /** null / undefined means create a new task. */
+  task?: Task | null
+  onSaved: (task: Task) => void
 }) {
   const [platformId, setPlatformId] = useState('')
   const [accountType, setAccountType] = useState('')
@@ -51,6 +54,36 @@ export function TaskDialog({
 
   useEffect(() => {
     if (!open) return
+
+    if (task) {
+      setPlatformId(task.platformId)
+      setAccountType(task.accountType || '')
+
+      const scheduled = task.scheduledAt ? new Date(task.scheduledAt) : null
+      if (scheduled && !Number.isNaN(scheduled.getTime())) {
+        setScheduledDate(dateKeyFromDate(scheduled))
+        setScheduledTime(timeKeyFromDate(scheduled))
+      } else {
+        setScheduledDate(defaultDate || todayKey())
+        setScheduledTime('09:00')
+      }
+
+      const since = typeof task.params.since === 'string'
+        ? task.params.since
+        : task.windowSince
+          ? dateKeyFromDate(new Date(task.windowSince))
+          : defaults.start
+      const until = typeof task.params.until === 'string'
+        ? task.params.until
+        : task.windowUntil
+          ? dateKeyFromDate(new Date(task.windowUntil))
+          : defaults.end
+      setWindowStart(since)
+      setWindowEnd(until)
+      setLimit(String(task.params.limit ?? 0))
+      return
+    }
+
     setPlatformId(platforms[0]?.id || '')
     setAccountType(accountTypes.includes('总部') ? '总部' : (accountTypes[0] || ''))
     setScheduledDate(defaultDate || todayKey())
@@ -58,9 +91,22 @@ export function TaskDialog({
     setWindowStart(defaults.start)
     setWindowEnd(defaults.end)
     setLimit('0')
-  }, [open, platforms, accountTypes, defaultDate, defaults])
+  }, [open, task, platforms, accountTypes, defaultDate, defaults])
 
   const canSubmit = Boolean(platformId && accountType && scheduledDate && scheduledTime && windowStart && windowEnd && !saving)
+
+  const scheduledAtMs = useMemo(() => {
+    if (!scheduledDate || !scheduledTime) return NaN
+    const ms = Date.parse(`${scheduledDate}T${scheduledTime}:00+08:00`)
+    return Number.isFinite(ms) ? ms : NaN
+  }, [scheduledDate, scheduledTime])
+  const scheduledInPast = Number.isFinite(scheduledAtMs) && scheduledAtMs <= Date.now()
+
+  const pastWarning = task
+    ? task.status === 'paused'
+      ? '该时间已过；任务仍保持暂停，继续后会立即执行。'
+      : '该时间已过，保存后 worker 会立即执行。'
+    : '该时间已过，创建后 worker 会立即执行。'
 
   const submit = async () => {
     if (!canSubmit) return
@@ -76,19 +122,20 @@ export function TaskDialog({
     setSaving(true)
     try {
       const scheduledAt = new Date(`${scheduledDate}T${scheduledTime}:00+08:00`).toISOString()
-      const result = await createTask({
+      const input = {
         platformId,
         accountType: accountType.trim(),
         scheduledAt,
         windowStart,
         windowEnd,
         limit: limitNumber,
-      })
-      toast.success('任务已创建，进入待执行')
+      }
+      const result = task ? await updateTask(task.id, input) : await createTask(input)
+      toast.success(task ? '任务已更新' : '任务已创建，进入待执行')
       onOpenChange(false)
-      onCreated(result.task)
+      onSaved(result.task)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '创建任务失败')
+      toast.error(error instanceof Error ? error.message : task ? '保存任务失败' : '创建任务失败')
     } finally {
       setSaving(false)
     }
@@ -98,8 +145,10 @@ export function TaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="cx-portal max-h-[90vh] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>创建任务</DialogTitle>
-          <DialogDescription>设置平台、账号类型和抓取时间。</DialogDescription>
+          <DialogTitle>{task ? '编辑任务' : '创建任务'}</DialogTitle>
+          <DialogDescription>
+            {task ? '修改未执行任务的参数；保存后仍保持原来的执行状态。' : '设置平台、账号类型和抓取时间。'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -133,6 +182,10 @@ export function TaskDialog({
               <Input type="date" value={scheduledDate} onChange={(event) => setScheduledDate(event.target.value)} />
               <Input type="time" value={scheduledTime} onChange={(event) => setScheduledTime(event.target.value)} />
             </div>
+            {task?.status === 'paused' ? (
+              <p className="text-[11px] text-muted-foreground">任务当前已暂停，保存后仍保持暂停，不会自动执行。</p>
+            ) : null}
+            {scheduledInPast ? <p className="text-[11px] text-amber-600">{pastWarning}</p> : null}
           </div>
 
           <div className="grid gap-2">
@@ -162,8 +215,8 @@ export function TaskDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
-            {saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            创建任务
+            {saving ? <LoaderCircle className="size-3.5 animate-spin" /> : task ? <Pencil className="size-3.5" /> : <Plus className="size-3.5" />}
+            {task ? '保存修改' : '创建任务'}
           </Button>
         </DialogFooter>
       </DialogContent>

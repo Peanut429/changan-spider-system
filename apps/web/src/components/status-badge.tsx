@@ -1,12 +1,17 @@
 import { cn } from '@/lib/utils'
 
-export type StatusTone = 'pending' | 'running' | 'success' | 'partial' | 'failed' | 'cancelled'
+export type StatusTone = 'pending' | 'paused' | 'running' | 'success' | 'partial' | 'failed' | 'cancelled'
 
 const META: Record<StatusTone, { label: string; className: string; dot: string }> = {
   pending: {
     label: '待执行',
     className: 'bg-amber-50 text-amber-800 ring-amber-200/80',
     dot: 'bg-amber-500',
+  },
+  paused: {
+    label: '已暂停',
+    className: 'bg-slate-100 text-slate-700 ring-slate-200/80',
+    dot: 'bg-slate-400',
   },
   running: {
     label: '执行中',
@@ -41,6 +46,7 @@ export function statusTone(status: string | null | undefined, runStatus?: string
   if (status === 'success') return 'success'
   if (runStatus === 'partial_failed') return 'partial'
   if (status === 'pending') return 'pending'
+  if (status === 'paused') return 'paused'
   if (status === 'running') return 'running'
   if (status === 'failed') return 'failed'
   if (status === 'cancelled') return 'cancelled'
@@ -50,6 +56,7 @@ export function statusTone(status: string | null | undefined, runStatus?: string
 
 const TONE_TEXT: Record<StatusTone, string> = {
   pending: 'text-muted-foreground',
+  paused: 'text-slate-400',
   running: 'text-sky-400',
   success: 'text-emerald-400',
   partial: 'text-orange-400',

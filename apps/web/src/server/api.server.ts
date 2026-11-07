@@ -109,6 +109,69 @@ function taskRow(row: any): Json {
 
 const ACCOUNT_FAILURE_CODES = new Set(["PARTIAL_ACCOUNTS_FAILED", "ALL_ACCOUNTS_FAILED"]);
 
+/**
+ * Account types are a many-to-many relation. The array is read on the account
+ * row so list/save share one shape; `a` is the account table alias.
+ */
+const accountTypesSelect = `
+  coalesce((
+    select array_agg(c.name order by case when c.name = '总部' then 0 else 1 end, c.name)
+      from account_category_members m
+      join account_categories c on c.id = m.category_id
+     where m.account_id = a.id and c.active
+  ), array[]::text[]) as account_types
+`;
+
+function accountDto(row: any): Json {
+  const types: string[] = Array.isArray(row.account_types) ? row.account_types : [];
+  return {
+    id: row.id,
+    platformId: row.platform_id,
+    platformCode: row.platform_code,
+    platformName: row.platform_name,
+    handle: row.handle,
+    displayName: row.display_name,
+    profileUrl: row.profile_url,
+    externalAccountId: row.external_account_id ?? null,
+    active: row.active,
+    accountType: types[0] || row.account_type || null,
+    accountTypes: types.length ? types : row.account_type ? [row.account_type] : [],
+    createdAt: iso(row.created_ts_ms),
+    updatedAt: iso(row.updated_ts_ms),
+  };
+}
+
+/** Resolve a type name to a category, creating the dictionary entry if needed. */
+async function ensureCategory(client: any, rawName: string): Promise<{ id: string; name: string }> {
+  const name = text(rawName).trim();
+  if (!name) throw new Error("账号类型不能为空");
+  if (name.length > 100) throw new Error("账号类型不能超过 100 个字符");
+  const existing = await client.query(
+    "select id, name, active from account_categories where code = $1 or name = $1 order by active desc limit 1",
+    [name],
+  );
+  if (existing.rows.length) {
+    const row = existing.rows[0];
+    if (!row.active) {
+      await client.query(
+        "update account_categories set active = true, updated_ts_ms = $2 where id = $1",
+        [row.id, Date.now()],
+      );
+    }
+    return { id: row.id, name: row.name };
+  }
+  const id = prefixedId("cat");
+  const now = Date.now();
+  await client.query(
+    `insert into account_categories(id, code, name, active, created_ts_ms, updated_ts_ms)
+     values ($1, $2, $3, true, $4, $4)
+     on conflict (code) do nothing`,
+    [id, name, name, now],
+  );
+  const created = await client.query("select id, name from account_categories where code = $1", [name]);
+  return { id: created.rows[0].id, name: created.rows[0].name };
+}
+
 type CoverageLike = {
   total?: number;
   success?: number;
@@ -160,7 +223,8 @@ function applyCoverage(task: Json, coverage: CoverageLike): Json {
 
 const taskSelect = `
   select t.id, t.platform_id, p.code as platform_code, p.name as platform_name,
-         t.account_type, t.params, t.priority,
+         t.category_id, coalesce(c.name, t.account_type) as account_type,
+         t.params, t.priority,
          t.status as task_status, t.scheduled_at_ms, t.attempts, t.run_id, t.last_error,
          r.status as run_status, r.started_ts_ms, r.finished_ts_ms,
          r.total_accounts, r.success_accounts, r.failed_accounts,
@@ -171,20 +235,23 @@ const taskSelect = `
              from social_accounts a
             where a.platform_id = t.platform_id
               and a.active = true
-              and (t.account_type is null or a.account_type = t.account_type)
-              and (t.category_id is null or exists (
-                select 1 from account_category_members m
-                 where m.account_id = a.id and m.category_id = t.category_id
-              ))
+              and (
+                (t.category_id is not null and exists (
+                  select 1 from account_category_members m
+                   where m.account_id = a.id and m.category_id = t.category_id
+                ))
+                or (t.category_id is null and (t.account_type is null or a.account_type = t.account_type))
+              )
               and (coalesce(t.params->>'account', '') = '' or a.handle = t.params->>'account')
          ) as planned_accounts
     from scrape_tasks t
     join platforms p on p.id = t.platform_id
+    left join account_categories c on c.id = t.category_id
     left join scrape_runs r on r.id = t.run_id
 `;
 
 
-async function createTask(pool: any, body: Json): Promise<Json> {
+function parseTaskFields(body: Json) {
   const platformId = text(body.platformId);
   const accountType = text(body.accountType) || null;
   const scheduledAtRaw = text(body.scheduledAt);
@@ -206,8 +273,28 @@ async function createTask(pool: any, body: Json): Promise<Json> {
   const windowStartTsMs = scrapeWindowStartTsMs(windowStart, TIME_ZONE);
   const windowEndTsMs = endOfDayInTimeZone(Number(windowEnd.replace(/-/g, "")), TIME_ZONE);
 
-  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [platformId]);
+  return {
+    platformId,
+    accountType,
+    scheduledAtMs,
+    since: windowStart,
+    until: windowEnd,
+    limit,
+    priority,
+    windowStartTsMs,
+    windowEndTsMs,
+  };
+}
+
+async function createTask(pool: any, body: Json): Promise<Json> {
+  const fields = parseTaskFields(body);
+
+  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [fields.platformId]);
   if (!platform.rows.length) throw new Error("平台不存在或已停用");
+
+  // Tasks target one type, but the type is resolved to the category so task
+  // account selection follows memberships (an account can be in several types).
+  const category = fields.accountType ? await ensureCategory(pool, fields.accountType) : null;
 
   const id = prefixedId("task");
   const now = Date.now();
@@ -216,34 +303,92 @@ async function createTask(pool: any, body: Json): Promise<Json> {
        id, platform_id, category_id, account_type, params, priority, status,
        scheduled_at_ms, lease_owner, lease_until_ms, attempts, run_id, last_error,
        created_ts_ms, updated_ts_ms
-     ) values ($1, $2, $3, $4, $5::jsonb, $6, 'pending', $7, null, null, 0, null, null, $8, $8)`,
-    [id, platformId, null, accountType, JSON.stringify({
-      since: windowStart,
-      until: windowEnd,
-      limit,
+     ) values ($1, $2, $3, null, $4::jsonb, $5, 'pending', $6, null, null, 0, null, null, $7, $7)`,
+    [id, fields.platformId, category?.id ?? null, JSON.stringify({
+      since: fields.since,
+      until: fields.until,
+      limit: fields.limit,
       timezone: TIME_ZONE,
-      windowStartTsMs,
-      windowEndTsMs,
-    }), priority, scheduledAtMs, now],
+      windowStartTsMs: fields.windowStartTsMs,
+      windowEndTsMs: fields.windowEndTsMs,
+    }), fields.priority, fields.scheduledAtMs, now],
   );
   const created = await pool.query(`${taskSelect} where t.id = $1`, [id]);
   return taskRow(created.rows[0]);
 }
 
+type UpdateTaskResult =
+  | { kind: "not_found" }
+  | { kind: "conflict"; message: string }
+  | { kind: "task"; task: Json };
+
+async function updateTask(pool: any, id: string, body: Json): Promise<UpdateTaskResult> {
+  const existingResult = await pool.query("select * from scrape_tasks where id = $1", [id]);
+  if (!existingResult.rows.length) return { kind: "not_found" };
+  const existing = existingResult.rows[0];
+  if (existing.params?.parentTaskId) return { kind: "conflict", message: "补跑任务不能编辑" };
+  if (existing.status !== "pending" && existing.status !== "paused") {
+    return { kind: "conflict", message: "只有未执行的任务可以编辑" };
+  }
+
+  const fields = parseTaskFields(body);
+  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [fields.platformId]);
+  if (!platform.rows.length) throw new Error("平台不存在或已停用");
+  const category = fields.accountType ? await ensureCategory(pool, fields.accountType) : null;
+
+  // Keep fields the edit form does not expose (for example an account filter),
+  // and keep the original priority unless the caller explicitly overrides it.
+  const params = {
+    ...(existing.params || {}),
+    since: fields.since,
+    until: fields.until,
+    limit: fields.limit,
+    timezone: TIME_ZONE,
+    windowStartTsMs: fields.windowStartTsMs,
+    windowEndTsMs: fields.windowEndTsMs,
+  };
+  const priority = body.priority === undefined ? Number(existing.priority) : fields.priority;
+  const now = Date.now();
+  const updated = await pool.query(
+    `update scrape_tasks
+        set platform_id = $2,
+            category_id = $3,
+            account_type = null,
+            params = $4::jsonb,
+            priority = $5,
+            scheduled_at_ms = $6,
+            last_error = null,
+            updated_ts_ms = $7
+      where id = $1 and status in ('pending','paused')
+      returning id`,
+    [id, fields.platformId, category?.id ?? null, JSON.stringify(params), priority, fields.scheduledAtMs, now],
+  );
+  if (!updated.rows.length) return { kind: "conflict", message: "任务已经开始执行，无法编辑" };
+
+  const task = await pool.query(`${taskSelect} where t.id = $1`, [id]);
+  return { kind: "task", task: taskRow(task.rows[0]) };
+}
+
 async function listTasks(pool: any, date: string): Promise<Json> {
+  // Paused tasks stay in the pending section; the worker only claims 'pending',
+  // so they are visible to the operator but will not run until resumed.
   const pendingResult = await pool.query(
     `${taskSelect}
-      where t.status = 'pending'
+      where t.status in ('pending', 'paused')
         and t.params->>'parentTaskId' is null
         and (to_timestamp(t.scheduled_at_ms / 1000) at time zone $2)::date = $1::date
       order by t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc`,
     [date, TIME_ZONE],
   );
+  // Group by the day the task was planned for, exactly like pending. If a task
+  // starts late (or after midnight), bucketing by run time would move it to a
+  // different day the moment it is claimed, so it would vanish from both lists
+  // on the page the operator is looking at.
   const executedResult = await pool.query(
     `${taskSelect}
       where t.status in ('running', 'success', 'failed', 'cancelled')
         and t.params->>'parentTaskId' is null
-        and (to_timestamp(coalesce(r.started_ts_ms, t.scheduled_at_ms) / 1000) at time zone $2)::date = $1::date
+        and (to_timestamp(t.scheduled_at_ms / 1000) at time zone $2)::date = $1::date
       order by coalesce(r.started_ts_ms, t.scheduled_at_ms) asc, t.priority asc`,
     [date, TIME_ZONE],
   );
@@ -261,6 +406,7 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   const executed = executedRows;
   const summary = {
     pending: pending.length,
+    paused: pending.filter((task: any) => task.status === "paused").length,
     running: executed.filter((task: any) => task.status === "running").length,
     success: executed.filter((task: any) => task.status === "success").length,
     failed: executed.filter((task: any) => task.status === "failed").length,
@@ -279,6 +425,27 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     ? params.accountIds.map((value: unknown) => String(value)).filter(Boolean)
     : null;
   const accountFilter = text(params.account);
+  const conditions = ["a.platform_id = $1"];
+  const values: any[] = [task.platform_id];
+  const categoryId = text(task.category_id) || null;
+  if (categoryId) {
+    values.push(categoryId);
+    conditions.push(`exists (
+      select 1 from account_category_members m
+       where m.account_id = a.id and m.category_id = $${values.length}
+    )`);
+  } else if (task.account_type) {
+    values.push(task.account_type);
+    conditions.push(`a.account_type = $${values.length}`);
+  }
+  if (accountFilter) {
+    values.push(accountFilter);
+    conditions.push(`a.handle = $${values.length}`);
+  }
+  if (scopeAccountIds) {
+    values.push(scopeAccountIds);
+    conditions.push(`a.id = any($${values.length})`);
+  }
   const accountsResult = await pool.query(
     `select a.id, a.handle, a.display_name, a.profile_url, a.active,
             a.account_type, a.metadata_json->>'source' as source,
@@ -287,12 +454,9 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
             p.code as platform_code
        from social_accounts a
        join platforms p on p.id = a.platform_id
-      where a.platform_id = $1
-        and ($2::text is null or a.account_type = $2)
-        and ($3::text = '' or a.handle = $3)
-        and ($4::boolean = false or a.id = any($5::text[]))
+      where ${conditions.join(" and ")}
       order by a.handle`,
-    [task.platform_id, task.account_type, accountFilter, Boolean(scopeAccountIds), scopeAccountIds || []],
+    values,
   );
 
   const childTasksResult = await pool.query(
@@ -523,7 +687,14 @@ async function listAccounts(pool: any, url: URL): Promise<Json> {
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
   const pageSize = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("pageSize") || "20", 10) || 20));
   if (platformId) { values.push(platformId); conditions.push(`a.platform_id = $${values.length}`); }
-  if (accountType) { values.push(accountType); conditions.push(`a.account_type = $${values.length}`); }
+  if (accountType) {
+    values.push(accountType);
+    conditions.push(`exists (
+      select 1 from account_category_members m
+      join account_categories c on c.id = m.category_id
+      where m.account_id = a.id and c.active and (c.code = $${values.length} or c.name = $${values.length})
+    )`);
+  }
   if (active === "true" || active === "false") {
     values.push(active === "true"); conditions.push(`a.active = $${values.length}`);
   }
@@ -547,7 +718,8 @@ async function listAccounts(pool: any, url: URL): Promise<Json> {
   const result = await pool.query(
     `select a.id, a.platform_id, p.code as platform_code, p.name as platform_name,
             a.handle, a.display_name, a.profile_url, a.external_account_id,
-            a.active, a.account_type, a.created_ts_ms, a.updated_ts_ms
+            a.active, a.account_type, a.created_ts_ms, a.updated_ts_ms,
+            ${accountTypesSelect}
        from social_accounts a
        join platforms p on p.id = a.platform_id
       where ${conditions.join(" and ")}
@@ -556,20 +728,7 @@ async function listAccounts(pool: any, url: URL): Promise<Json> {
     dataValues,
   );
   return {
-    accounts: result.rows.map((row: any) => ({
-      id: row.id,
-      platformId: row.platform_id,
-      platformCode: row.platform_code,
-      platformName: row.platform_name,
-      handle: row.handle,
-      displayName: row.display_name,
-      profileUrl: row.profile_url,
-      externalAccountId: row.external_account_id,
-      active: row.active,
-      accountType: row.account_type,
-      createdAt: iso(row.created_ts_ms),
-      updatedAt: iso(row.updated_ts_ms),
-    })),
+    accounts: result.rows.map(accountDto),
     total,
     activeCount,
     inactiveCount: total - activeCount,
@@ -585,14 +744,13 @@ async function listPlatforms(pool: any): Promise<Json[]> {
 
 async function listAccountTypes(pool: any): Promise<string[]> {
   const result = await pool.query(
-    `select account_type from (
-       select distinct account_type
-         from social_accounts
-        where account_type is not null and btrim(account_type) <> ''
-     ) types
-     order by case when account_type = '总部' then 0 else 1 end, account_type`,
+    `select c.name
+       from account_categories c
+      where c.active = true
+        and exists (select 1 from account_category_members m where m.category_id = c.id)
+      order by case when c.name = '总部' then 0 else 1 end, c.name`,
   );
-  return result.rows.map((row: any) => row.account_type);
+  return result.rows.map((row: any) => row.name);
 }
 
 async function importAccounts(pool: any, body: Json): Promise<Json> {
@@ -610,6 +768,7 @@ async function importAccounts(pool: any, body: Json): Promise<Json> {
   const errors: string[] = [];
   try {
     await client.query("begin");
+    const category = await ensureCategory(client, accountType);
     for (const raw of rows) {
       if (!raw || typeof raw !== "object") { skipped += 1; continue; }
       const platformCode = text((raw as Json).platformCode).toLowerCase();
@@ -634,10 +793,17 @@ async function importAccounts(pool: any, body: Json): Promise<Json> {
           "select id from social_accounts where platform_id = $1 and handle = $2",
           [platformId, handle],
         );
+        const accountId = existing.rows.length ? existing.rows[0].id : prefixedId("account");
         if (existing.rows.length) {
           await client.query(
-            "update social_accounts set account_type = $2, updated_ts_ms = $3 where id = $1",
-            [existing.rows[0].id, accountType, now],
+            `update social_accounts
+                set account_type = case
+                      when account_type is null or btrim(account_type) = '' then $2
+                      else account_type
+                    end,
+                    updated_ts_ms = $3
+              where id = $1`,
+            [accountId, accountType, now],
           );
           updated += 1;
         } else {
@@ -646,10 +812,16 @@ async function importAccounts(pool: any, body: Json): Promise<Json> {
                id, platform_id, handle, display_name, profile_url, active,
                metadata_json, created_ts_ms, updated_ts_ms, account_type
              ) values ($1, $2, $3, $4, $5, true, '{"source":"excel_import"}'::jsonb, $6, $6, $7)`,
-            [prefixedId("account"), platformId, handle, displayName, profileUrl, now, accountType],
+            [accountId, platformId, handle, displayName, profileUrl, now, accountType],
           );
           created += 1;
         }
+        // Excel import adds the batch type; other memberships stay intact so a
+        // re-import cannot silently drop a type such as 中南美-月报.
+        await client.query(
+          "insert into account_category_members(account_id, category_id, created_ts_ms) values ($1, $2, $3) on conflict (account_id, category_id) do nothing",
+          [accountId, category.id, now],
+        );
       } catch (error: any) {
         errors.push(`${handle || "(空)"} 导入失败：${error.message}`);
         skipped += 1;
@@ -674,16 +846,30 @@ async function saveAccount(
   const handle = text(body.handle);
   const displayName = text(body.displayName) || null;
   const profileUrl = text(body.profileUrl);
-  const accountType = text(body.accountType) || null;
+  const rawTypes = Array.isArray(body.accountTypes)
+    ? body.accountTypes
+    : body.accountType
+      ? [body.accountType]
+      : [];
+  const accountTypes = [...new Set(rawTypes.map((value: unknown) => text(value).trim()).filter(Boolean))];
   const active = bool(body.active, true);
 
   if (!existingId && !platformId) throw new Error("缺少 platformId");
   if (!handle) throw new Error("缺少 handle");
   if (!profileUrl) throw new Error("缺少 profileUrl");
+  if (!accountTypes.length) throw new Error("请选择至少一个账号类型");
+  if (accountTypes.some((type) => type.length > 100)) throw new Error("账号类型不能超过 100 个字符");
 
+  const primaryType = accountTypes[0];
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const categories: { id: string; name: string }[] = [];
+    for (const type of accountTypes) {
+      const category = await ensureCategory(client, type);
+      if (!categories.some((item) => item.id === category.id)) categories.push(category);
+    }
+
     let accountId = existingId || "";
     if (existingId) {
       const updated = await client.query(
@@ -692,7 +878,7 @@ async function saveAccount(
                 account_type = $5, active = $6, updated_ts_ms = $7
           where id = $1
           returning id`,
-        [existingId, handle, displayName, profileUrl, accountType, active, Date.now()],
+        [existingId, handle, displayName, profileUrl, primaryType, active, Date.now()],
       );
       if (!updated.rows.length) throw new Error("账号不存在");
     } else {
@@ -703,21 +889,32 @@ async function saveAccount(
            id, platform_id, handle, display_name, profile_url, active,
            metadata_json, created_ts_ms, updated_ts_ms, account_type
          ) values ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $7, $8)`,
-        [accountId, platformId, handle, displayName, profileUrl, active, now, accountType],
+        [accountId, platformId, handle, displayName, profileUrl, active, now, primaryType],
+      );
+    }
+
+    await client.query("delete from account_category_members where account_id = $1", [accountId]);
+    const now = Date.now();
+    for (const category of categories) {
+      await client.query(
+        "insert into account_category_members(account_id, category_id, created_ts_ms) values ($1, $2, $3)",
+        [accountId, category.id, now],
       );
     }
 
     await client.query("commit");
     const saved = await pool.query(
       `select a.id, a.platform_id, p.code as platform_code, p.name as platform_name,
-              a.handle, a.display_name, a.profile_url, a.active, a.account_type
+              a.handle, a.display_name, a.profile_url, a.external_account_id,
+              a.active, a.account_type, a.created_ts_ms, a.updated_ts_ms,
+              ${accountTypesSelect}
          from social_accounts a
          join platforms p on p.id = a.platform_id
         where a.id = $1`,
       [accountId],
     );
 
-    return saved.rows[0];
+    return accountDto(saved.rows[0]);
   } catch (error) {
     await client.query("rollback").catch(() => {});
     throw error;
@@ -753,15 +950,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       if (!parentResult.rows.length) return fail(404, "任务不存在");
       const parent = parentResult.rows[0];
       if (parent.params?.parentTaskId) return fail(409, "请从主任务发起补跑");
+      if (parent.status === "paused") return fail(409, "任务已暂停，请先继续执行");
       const body = await readJson(request);
       const mode = text(body.mode);
       if (!["failed", "new", "selected"].includes(mode)) return fail(400, "mode 必须是 failed、new 或 selected");
 
       const busy = await handle.pool.query(
-        "select id from scrape_tasks where params->>'parentTaskId' = $1 and status in ('pending','running') limit 1",
+        "select id from scrape_tasks where params->>'parentTaskId' = $1 and status in ('pending','paused','running') limit 1",
         [parentId],
       );
-      if (busy.rows.length) return fail(409, "已有补跑任务正在等待或执行");
+      if (busy.rows.length) return fail(409, "已有补跑任务在等待、暂停或执行中");
 
       const coverageData = await loadTaskCoverage(handle.pool, parent);
       let targets: any[] = [];
@@ -824,12 +1022,77 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const task = await handle.pool.query(`${taskSelect} where t.id = $1`, [id]);
       return json(200, { task: taskRow(task.rows[0]) });
     }
+    const taskPauseMatch = path.match(/^\/api\/tasks\/([^/]+)\/pause$/);
+    if (method === "POST" && taskPauseMatch) {
+      const id = decodeURIComponent(taskPauseMatch[1]);
+      const now = Date.now();
+      const updated = await handle.pool.query(
+        `update scrape_tasks
+            set status = 'paused',
+                updated_ts_ms = $2
+          where id = $1 and status = 'pending'
+          returning id`,
+        [id, now],
+      );
+      if (!updated.rows.length) {
+        const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
+        if (!current.rows.length) return fail(404, "任务不存在");
+        const status = current.rows[0].status;
+        if (status === "paused") return json(200, { ok: true, id, status, already: true });
+        if (status === "running") return fail(409, "任务正在执行，无法暂停");
+        return fail(409, "只有待执行任务可以暂停");
+      }
+      return json(200, { ok: true, id, status: "paused" });
+    }
+    const taskResumeMatch = path.match(/^\/api\/tasks\/([^/]+)\/resume$/);
+    if (method === "POST" && taskResumeMatch) {
+      const id = decodeURIComponent(taskResumeMatch[1]);
+      const now = Date.now();
+      const updated = await handle.pool.query(
+        `update scrape_tasks
+            set status = 'pending',
+                updated_ts_ms = $2
+          where id = $1 and status = 'paused'
+          returning id, scheduled_at_ms`,
+        [id, now],
+      );
+      if (!updated.rows.length) {
+        const current = await handle.pool.query("select status, scheduled_at_ms from scrape_tasks where id = $1", [id]);
+        if (!current.rows.length) return fail(404, "任务不存在");
+        const status = current.rows[0].status;
+        if (status === "pending") {
+          return json(200, {
+            ok: true,
+            id,
+            status,
+            already: true,
+            immediate: Number(current.rows[0].scheduled_at_ms) <= now,
+          });
+        }
+        return fail(409, "只有已暂停任务可以继续");
+      }
+      return json(200, {
+        ok: true,
+        id,
+        status: "pending",
+        immediate: Number(updated.rows[0].scheduled_at_ms) <= now,
+      });
+    }
+    if (method === "PUT" && taskMatch) {
+      const id = decodeURIComponent(taskMatch[1]);
+      const result = await updateTask(handle.pool, id, await readJson(request));
+      if (result.kind === "not_found") return fail(404, "任务不存在");
+      if (result.kind === "conflict") return fail(409, result.message);
+      return json(200, { task: result.task });
+    }
     if (method === "DELETE" && taskMatch) {
       const id = decodeURIComponent(taskMatch[1]);
       const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
       if (!current.rows.length) return fail(404, "任务不存在");
-      if (current.rows[0].status !== "pending") return fail(409, "只有待执行任务可以删除");
-      await handle.pool.query("delete from scrape_tasks where id = $1 and status = 'pending'", [id]);
+      if (!["pending", "paused"].includes(current.rows[0].status)) {
+        return fail(409, "只有待执行或已暂停任务可以删除");
+      }
+      await handle.pool.query("delete from scrape_tasks where id = $1 and status in ('pending','paused')", [id]);
       return json(200, { ok: true, id });
     }
     if (method === "GET" && path === "/api/accounts") {

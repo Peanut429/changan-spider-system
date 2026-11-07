@@ -1,0 +1,295 @@
+# 部署到 Linux 服务器（pm2）
+
+面向本仓库：`apps/web`（TanStack Start + Nitro）和 `apps/crawler`（无端口 worker）。
+目标机器以 Ubuntu 22.04 / 24.04 为例，2 核 4G 起步即可跑 Web；要同时跑爬虫建议 4 核 8G。
+
+## 0. 部署形态
+
+```text
+浏览器 ──HTTPS──> nginx :443 ──> 127.0.0.1:3000 ──> pm2: changan-web（Nitro node-server，2 实例）
+                                                          │
+                                                          └──> PostgreSQL（本机或阿里云 RDS）
+
+pm2: changan-worker（可选，无端口）──轮询 scrape_tasks──> PostgreSQL
+                                    └──> Chrome + 已登录 profile（需要虚拟显示）
+```
+
+两个关键事实，决定了下面的所有步骤：
+
+1. **Web 的产物是 `apps/web/.output`**（Nitro `node-server` 预设），启动入口就是 `apps/web/.output/server/index.mjs`，只认 `PORT` / `NITRO_PORT` 和 `HOST` 环境变量。
+2. **产物在运行时不会读取 `.env`**，只有构建时才会。所以 `DATABASE_URL` 必须由 pm2 注入进程环境——`ecosystem.config.cjs` 已经做了这件事。
+
+## 1. 服务器准备
+
+```bash
+# 以 root 或 sudo 用户执行
+adduser --disabled-password --gecos "" deploy
+usermod -aG sudo deploy
+mkdir -p /srv/changan && chown deploy:deploy /srv/changan
+
+apt update && apt install -y git curl build-essential nginx postgresql-client
+
+# 时区（任务按 Asia/Shanghai 算日期，别用 UTC）
+timedatectl set-timezone Asia/Shanghai
+
+# 防火墙：只放 22/80/443，3000 不要暴露
+ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw --force enable
+```
+
+### Node 24（项目要求 `node >= 24`）
+
+```bash
+su - deploy
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+nvm install 24          # 写进 .nvmrc 也行；当前本地是 v24.19.0
+node -v                 # v24.x
+```
+
+### pnpm 11.22.0 + pm2
+
+```bash
+# corepack 会读 package.json 里的 packageManager 字段
+corepack enable
+corepack prepare pnpm@11.22.0 --activate
+pnpm -v                 # 11.22.0
+
+# 如果 corepack 不可用（Node 新版本已移除），改用：
+# npm i -g pnpm@11.22.0
+
+npm i -g pm2
+pm2 -v
+```
+
+## 2. 数据库
+
+`apps/web/.env` 现在指向的是阿里云 RDS（`changan_social_data`）。两种情况：
+
+**A. 继续用已有生产库（推荐）**
+新服务器只是多一个客户端，只需：
+
+1. 在 RDS 白名单里加上这台服务器的出口 IP；
+2. 用 `prod-upgrade.sql` 补齐新表结构（脚本幂等，可重复执行）：
+
+```bash
+psql "$DATABASE_URL" -f apps/crawler/db/prod-upgrade.sql
+```
+
+**B. 全新空库**
+不要执行 `apps/crawler/db/schema.sql`——文件头写明它是**测试库专用**，开头就是 `drop table ... cascade`。正确做法是从现有库导结构：
+
+```bash
+pg_dump --schema-only --no-owner --no-privileges "$OLD_DATABASE_URL" > /tmp/schema.sql
+psql "$NEW_DATABASE_URL" -f /tmp/schema.sql
+```
+
+## 3. 拉代码
+
+```bash
+su - deploy
+git clone git@github.com:<your-org>/changan.git /srv/changan
+cd /srv/changan
+pnpm install --frozen-lockfile
+```
+
+仓库根目录的 `package.json` 是 monorepo 入口，**不要**进 `apps/web` 里单独 install/install 脚本。
+
+## 4. 环境变量
+
+按仓库约定，每个 app 读自己的 `.env`：
+
+```bash
+cd /srv/changan
+cp apps/web/.env.example apps/web/.env
+cp apps/crawler/.env.example apps/crawler/.env
+chmod 600 apps/web/.env apps/crawler/.env
+```
+
+`apps/web/.env` 至少要有：
+
+```dotenv
+DATABASE_URL=postgres://user:password@rds-host:5432/changan_social_data
+DB_POOL_MAX=10
+SCRAPE_TIMEZONE=Asia/Shanghai
+```
+
+`apps/crawler/.env` 还要补浏览器相关变量，见第 9 节。
+
+> `ecosystem.config.cjs` 会在 `pm2 start` 时解析这两个 `.env` 并注入进程环境（Nitro 运行时不会自己读 `.env`）。
+> 因此**改完 `.env` 必须 `pm2 reload ecosystem.config.cjs --update-env`**，只重启进程不会重新读取文件。
+
+## 5. 构建
+
+```bash
+cd /srv/changan
+pnpm build:web          # = pnpm --filter @changan/web build
+ls apps/web/.output/server/index.mjs
+```
+
+产物约 6MB，自带依赖，运行时不需要 `node_modules`。
+构建完可以顺手自测（用假 DB 也能过健康检查，因为 pg 连接池是懒连接）：
+
+```bash
+cd apps/web
+PORT=3999 HOST=127.0.0.1 DATABASE_URL="postgres://u:p@127.0.0.1:1/x" node .output/server/index.mjs
+# 另一个终端：curl http://127.0.0.1:3999/api/health   → {"ok":true}
+```
+
+## 6. 用 pm2 常驻
+
+仓库根目录已经带了 `ecosystem.config.cjs`（web 2 实例 cluster + worker 单实例 fork，worker 默认 `autostart: false`）。
+
+```bash
+cd /srv/changan
+pm2 start ecosystem.config.cjs        # 只起 changan-web
+pm2 ls
+pm2 logs changan-web
+curl http://127.0.0.1:3000/api/health
+```
+
+验证无误后固化开机自启：
+
+```bash
+pm2 save
+pm2 startup systemd -u deploy --hp /home/deploy   # 按提示复制执行它输出的那条 sudo 命令
+pm2 save                                          # 再 save 一次，确保 dump 里是最新进程列表
+```
+
+日常操作：
+
+| 目的 | 命令 |
+| --- | --- |
+| 平滑重载（cluster 下接近零停机） | `pm2 reload ecosystem.config.cjs --update-env` |
+| 只重载 web | `pm2 reload ecosystem.config.cjs --only changan-web --update-env` |
+| 重启 | `pm2 restart changan-web` |
+| 停止 / 删除 | `pm2 stop changan-web` / `pm2 delete changan-web` |
+| 看状态 | `pm2 ls` / `pm2 monit` |
+| 看日志 | `pm2 logs changan-web --lines 200` |
+| 日志切割（强烈建议） | `pm2 install pm2-logrotate` |
+
+> 只启动 worker：`pm2 start ecosystem.config.cjs --only changan-worker`。
+
+## 7. nginx 反向代理
+
+```bash
+sudo cp /srv/changan/deploy/nginx.conf /etc/nginx/sites-available/changan.conf
+sudo sed -i 's/example.com/你的域名/' /etc/nginx/sites-available/changan.conf
+sudo ln -s ../sites-available/changan.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+配置要点（文件里已写好）：
+
+- `proxy_pass http://changan_web;` 指向 `127.0.0.1:3000`，带 `X-Forwarded-Proto/For`；
+- `/assets/` 走 30 天强缓存（文件名带内容哈希）；
+- `client_max_body_size 50m`，给账号导入的上传留余量；
+- `proxy_read_timeout 300s`，避免报表/导出接口被 60s 掐断；
+- SSR 页面不加缓存。
+
+HTTPS：
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d 你的域名
+```
+
+## 8. 验收清单
+
+```bash
+curl -I https://你的域名/                      # 200，或 307 跳到 /tasks
+curl -s https://你的域名/api/health            # {"ok":true}
+curl -s "https://你的域名/api/platforms"       # 能读到数据 → 服务器到 DB 通
+pm2 ls                                        # 2 个 changan-web 实例 online
+pm2 logs changan-web --lines 50 --nostream    # 没有 500 / ECONNREFUSED
+sudo tail -f /var/log/nginx/changan.error.log
+```
+
+## 9. 爬虫 worker（可选）
+
+worker 用 `node --experimental-strip-types` 直接跑 TS，不需要构建，但对浏览器环境有硬要求：
+
+1. **它是有头浏览器**（`apps/crawler/src/core/browser.ts` 里 `headless: false`），Linux 上必须给虚拟显示：
+
+   ```bash
+   sudo apt install -y xvfb
+   # 用 systemd 常驻一个虚拟屏
+   sudo tee /etc/systemd/system/xvfb.service >/dev/null <<'EOF'
+   [Unit]
+   Description=Virtual framebuffer for Chrome
+   After=network.target
+   [Service]
+   ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24
+   Restart=always
+   [Install]
+   WantedBy=multi-user.target
+   EOF
+   sudo systemctl enable --now xvfb
+   ```
+
+   然后在 `apps/crawler/.env` 里加 `DISPLAY=:99`。
+
+2. **装 Chrome 和系统依赖**：
+
+   ```bash
+   # 方式一：装系统 Chrome，最稳
+   wget -qO- https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+   echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+   sudo apt update && sudo apt install -y google-chrome-stable
+   # .env: SOCIAL_BROWSER_EXECUTABLE=/usr/bin/google-chrome
+
+   # 方式二：用 Playwright 自带 chromium
+   cd /srv/changan && pnpm --filter @changan/crawler exec playwright install --with-deps chromium
+   ```
+
+3. **登录态**：`SOCIAL_BROWSER_USER_DATA_DIR` 指向一个持久目录（如 `/srv/changan/data/chrome-profile`），
+   登录一次后 cookie 存在里面。在无桌面的服务器上登录比较别扭，两个办法：
+   - 在本机（Chrome 同大版本）登录后，把 profile 目录打包上传；
+   - 服务器上跑 `xvfb-run` + x11vnc，用 VNC 连进去点登录。
+   注意**同一个 profile 同时只能有一个进程在用**，所以 worker 必须 `instances: 1`。
+
+4. 启动并观察：
+
+   ```bash
+   pm2 start ecosystem.config.cjs --only changan-worker
+   pm2 logs changan-worker --lines 100
+   ```
+
+## 10. 日常发布
+
+```bash
+chmod +x deploy/deploy.sh      # 首次
+cd /srv/changan && ./deploy/deploy.sh
+```
+
+脚本流程：`git pull` → `pnpm install --frozen-lockfile` → `pnpm build:web` → `pm2 reload --update-env` → 轮询 `/api/health`。
+构建失败会在 reload 之前退出，线上旧版本继续服务。
+
+如果不希望服务器装构建工具链，也可以本地/CI 构建后只传产物（产物自带依赖）：
+
+```bash
+rsync -avz --delete apps/web/.output/ deploy@server:/srv/changan/apps/web/.output/
+ssh deploy@server 'cd /srv/changan && pm2 reload ecosystem.config.cjs --only changan-web'
+```
+
+## 11. 故障排查
+
+| 现象 | 原因 / 处理 |
+| --- | --- |
+| `/api/health` 返回 400 `缺少 DATABASE_URL` | pm2 没注入环境变量。确认 `apps/web/.env` 存在且 `pm2 reload ... --update-env`；`pm2 env 0` 可以看到实际环境 |
+| 改了 `.env` 不生效 | `.env` 只在 `pm2 start/reload` 读配置时解析，必须带 `--update-env`，或 `pm2 delete` 后重新 start |
+| nginx 502 | web 没起来或不在 3000。`pm2 logs changan-web`、`ss -lntp \| grep 3000` |
+| `EADDRINUSE` | 本机已有进程占 3000（比如误跑了 `pnpm dev:web`）；或 `.env` 里的 `PORT` 和 nginx upstream 不一致 |
+| 页面 200 但静态资源 404 | 检查 `apps/web/.output/public` 是否存在、nginx 是否把 `/assets/` 也转给了 upstream |
+| 构建时 OOM / 被 kill | 小内存机器加 swap：`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile` |
+| `pnpm: command not found`（pm2 重启后） | pm2 守护进程 PATH 不含 nvm。用 `pm2 startup` 生成的 systemd 单元启动，或把 pm2/Node 装成系统级 |
+| worker 报 `Missing X server or $DISPLAY` | 没装 Xvfb 或没设 `DISPLAY=:99`（见第 9 节） |
+| worker 报 Chrome 沙箱错误 | 用非 root 用户跑 pm2；确需 root 才加 `--no-sandbox` |
+| 连不上 RDS | 服务器出口 IP 没进 RDS 白名单，或安全组未放行 5432 出方向 |
+| 用 nvm 升级 Node 后 pm2 起不来 | `ecosystem.config.cjs` 把 `process.execPath` 写死进进程配置，旧路径失效。`pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save`，再重跑一次 `pm2 startup` |
+
+## 12. 注意
+
+- `pnpm dev:web` 只用于开发（HMR、devtools），线上永远跑 `.output/server/index.mjs`。
+- 同一台机器不要再起第二个 worker：会抢同一个 Chrome profile。
+- `apps/web/.output` 和 `.env` 都在 `.gitignore` 里，部署后不要指望 `git pull` 带来它们。
+- 目前没有自动迁移脚本，DB 结构变更仍靠 `apps/crawler/db/*.sql` 手工执行。

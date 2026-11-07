@@ -110,6 +110,13 @@ export function createTask(input: CreateTaskInput) {
   })
 }
 
+export function updateTask(id: string, input: CreateTaskInput) {
+  return request<{ task: Task }>(`/api/tasks/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
 export type ImportAccountRow = {
   platformCode: string
   handle: string
@@ -128,6 +135,20 @@ export function deleteTask(id: string) {
   return request<{ ok: boolean; id: string }>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
+}
+
+export function pauseTask(id: string) {
+  return request<{ ok: boolean; id: string; status: string; already?: boolean }>(
+    `/api/tasks/${encodeURIComponent(id)}/pause`,
+    { method: 'POST' },
+  )
+}
+
+export function resumeTask(id: string) {
+  return request<{ ok: boolean; id: string; status: string; immediate?: boolean; already?: boolean }>(
+    `/api/tasks/${encodeURIComponent(id)}/resume`,
+    { method: 'POST' },
+  )
 }
 
 export function retryTask(id: string) {
