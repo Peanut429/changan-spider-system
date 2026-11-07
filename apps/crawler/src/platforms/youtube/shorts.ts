@@ -1,5 +1,6 @@
 // YouTube Shorts 抓取逻辑。
 import { gotoWithRetry } from "../../core/page-http.ts";
+import { autoAcceptYouTubeConsent } from "./page.ts";
 // Shorts 与普通视频的页面结构完全不同：
 //   - 列表页 /@channel/shorts 用 shortsLockupViewModel 渲染，只有标题和播放量，没有发布时间
 //   - 详情页 /shorts/<id> 没有 JSON-LD，但 ytInitialPlayerResponse.microformat.playerMicroformatRenderer
@@ -41,17 +42,6 @@ function secondsToDuration(seconds) {
   const s = n % 60;
   if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-async function autoAcceptYouTubeConsent(page) {
-  for (const text of ["Accept all", "I agree", "全部接受", "接受全部"]) {
-    const button = page.getByRole("button", { name: text, exact: true });
-    if (await button.count().catch(() => 0)) {
-      await button.click().catch(() => {});
-      await page.waitForTimeout(1000);
-      return;
-    }
-  }
 }
 
 async function waitForChannelReady(page, timeoutMs = 45000) {

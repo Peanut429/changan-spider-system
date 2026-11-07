@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/factory.ts";
 import { platforms, socialAccounts } from "../db/schema.ts";
 
@@ -11,17 +11,31 @@ export async function loadPlatformAccounts({
   db,
   platformCode,
   accountType,
+  categoryId,
   account,
   accountIds,
   limit = 0,
 }: {
   db: Database;
   platformCode: string;
-  accountType: string;
+  accountType?: string;
+  categoryId?: string;
   account?: string;
   accountIds?: string[];
   limit?: number;
 }): Promise<SourceAccount[]> {
+  // A category task selects accounts through the many-to-many membership;
+  // old tasks still carry the single account_type string.
+  const typeScope = categoryId
+    ? sql`exists (
+        select 1 from account_category_members m
+         where m.account_id = ${socialAccounts.id}
+           and m.category_id = ${categoryId}
+      )`
+    : accountType
+      ? eq(socialAccounts.accountType, accountType)
+      : sql`true`;
+
   const rows = await db
     .select({
       id: socialAccounts.id,
@@ -34,7 +48,7 @@ export async function loadPlatformAccounts({
       eq(platforms.code, platformCode),
       eq(platforms.enabled, true),
       eq(socialAccounts.active, true),
-      eq(socialAccounts.accountType, accountType),
+      typeScope,
     ))
     .orderBy(socialAccounts.handle);
 

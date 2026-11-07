@@ -6,6 +6,7 @@ export type ScrapeTask = {
   platformId: string;
   platformCode: string;
   categoryId: string | null;
+  categoryName: string | null;
   accountType: string | null;
   params: Record<string, any>;
   priority: number;
@@ -29,6 +30,7 @@ function mapTask(row: any): ScrapeTask {
     platformId: row.platform_id,
     platformCode: row.platform_code,
     categoryId: row.category_id,
+    categoryName: row.category_name ?? null,
     accountType: row.account_type,
     params: row.params || {},
     priority: Number(row.priority),
@@ -51,9 +53,10 @@ export async function claimNextTask(
   try {
     await client.query("begin");
     const selected = await client.query(
-      `select t.*, p.code as platform_code
+      `select t.*, p.code as platform_code, c.name as category_name
          from scrape_tasks t
          join platforms p on p.id = t.platform_id
+         left join account_categories c on c.id = t.category_id
         where t.status = 'pending'
           and t.scheduled_at_ms <= $1
         order by t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc
@@ -78,7 +81,7 @@ export async function claimNextTask(
       [row.id, workerId, nowMs + leaseMs, nowMs],
     );
     await client.query("commit");
-    return mapTask({ ...row, ...updated.rows[0], platform_code: row.platform_code });
+    return mapTask({ ...row, ...updated.rows[0], platform_code: row.platform_code, category_name: row.category_name });
   } catch (error) {
     await client.query("rollback").catch(() => {});
     throw error;
@@ -108,8 +111,8 @@ export async function resolveTaskAccounts(handle: DbHandle, task: ScrapeTask): P
       select 1 from account_category_members m
        where m.account_id = a.id and m.category_id = $${values.length}
     )`);
-  }
-  if (task.accountType) {
+  } else if (task.accountType) {
+    // Legacy tasks only have the single account_type string.
     values.push(task.accountType);
     conditions.push(`a.account_type = $${values.length}`);
   }

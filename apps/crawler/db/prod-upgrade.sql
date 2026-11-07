@@ -54,7 +54,7 @@ create table if not exists scrape_tasks (
   created_ts_ms bigint not null,
   updated_ts_ms bigint not null,
   constraint ck_scrape_tasks_status check (
-    status in ('pending', 'running', 'success', 'failed', 'cancelled')
+    status in ('pending', 'paused', 'running', 'success', 'failed', 'cancelled')
   ),
   constraint ck_scrape_tasks_priority check (priority between 0 and 1000)
 );

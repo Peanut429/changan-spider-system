@@ -1,4 +1,14 @@
-import { dateRangePosition, formatDateText, nowInDisplayTimeZone } from "../../core/time.ts";
+import { dateRangePosition, nowInDisplayTimeZone } from "../../core/time.ts";
+import {
+  approxRelativePublishedDate,
+  approxRelativePublishedRange,
+  extractExactViewCount,
+  extractListRelativePublished,
+  normalizeExactViewCount,
+  parseLocalizedNumber,
+  parseYouTubeDateText,
+  secondsToDuration,
+} from "./parse.ts";
 import { applyVideoUploadDate, extractVideoDescription, extractVideoUploadDate } from "./jsonld.ts";
 import {
   collectShortsList,
@@ -10,6 +20,16 @@ import {
 } from "./shorts.ts";
 import type { AccountContext, AccountScrapeResult, PlatformScraper } from "../types.ts";
 import { gotoWithRetry } from "../../core/page-http.ts";
+import { autoAcceptYouTubeConsent } from "./page.ts";
+import {
+  collectYouTubeList,
+  createYouTubeHttpSession,
+  fetchYouTubeContinuation,
+  fetchYouTubeVideoDetail,
+  YouTubeHttpError,
+  YOUTUBE_MAX_LIST_PAGES,
+} from "./http.ts";
+import type { YouTubeHttpSession, YouTubeHttpVideoDetail } from "./http.ts";
 
 type YouTubeArgs = {
   sinceTime: number | null;
@@ -37,153 +57,6 @@ function slugFromChannelUrl(input) {
   const parts = url.pathname.split("/").filter(Boolean);
   const raw = parts.find((p) => p.startsWith("@")) || parts.at(-1) || "youtube-channel";
   return raw.replace(/^@/, "").replace(/[^a-z0-9_-]+/gi, "_").toLowerCase();
-}
-
-
-function parseLocalizedNumber(value) {
-  if (value == null) return null;
-  let text = String(value).trim();
-  if (!text) return null;
-  text = text.replace(/,/g, "").replace(/\s+/g, "");
-  const match = text.match(/(\d+(?:\.\d+)?|\.\d+)(亿|万|千|billion|million|thousand|[kmb])?/i);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  const unit = String(match[2] || "").toLowerCase();
-  const multiplier =
-    unit === "亿" ? 100000000 :
-    unit === "万" ? 10000 :
-    unit === "千" || unit === "thousand" || unit === "k" ? 1000 :
-    unit === "million" || unit === "m" ? 1000000 :
-    unit === "billion" || unit === "b" ? 1000000000 :
-    1;
-  return Number.isFinite(parsed) ? Math.round(parsed * multiplier) : null;
-}
-
-function extractExactViewCount(text) {
-  const source = String(text || "").trim();
-  if (!source) return "";
-  const match = source.match(/([0-9][\d,.\s]*)\s*(?:次观看|views?)/i);
-  if (!match) return "";
-  const digits = match[1].replace(/[^\d]/g, "");
-  return digits || "";
-}
-
-function normalizeExactViewCount(value) {
-  const source = String(value || "").trim();
-  if (/^\d+$/.test(source)) return source;
-  return extractExactViewCount(source);
-}
-
-function parseYouTubeDateText(text) {
-  const source = String(text || "").replace(/\s+/g, " ").trim();
-  if (!source) return "";
-
-  const iso = source.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
-  if (iso) return `${iso[1]}-${String(Number(iso[2])).padStart(2, "0")}-${String(Number(iso[3])).padStart(2, "0")}`;
-
-  const zh = source.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  if (zh) return `${zh[1]}-${String(Number(zh[2])).padStart(2, "0")}-${String(Number(zh[3])).padStart(2, "0")}`;
-
-  const slash = source.match(/\b(\d{4})\/(\d{1,2})\/(\d{1,2})\b/);
-  if (slash) return `${slash[1]}-${String(Number(slash[2])).padStart(2, "0")}-${String(Number(slash[3])).padStart(2, "0")}`;
-
-  const chunks = source.split(/\s*[•|]\s*/).map((s) => s.trim()).filter(Boolean);
-  for (const chunk of chunks.length ? chunks : [source]) {
-    if (/观看|views?|#/.test(chunk)) continue;
-    const cleaned = chunk
-      .replace(/^(?:published|premiered|streamed live on|uploaded|发布于|首播开始于|直播开始于)\s*:?\s*/i, "")
-      .trim();
-    const time = Date.parse(cleaned);
-    if (Number.isFinite(time)) return formatDateText(time);
-  }
-  return "";
-}
-
-function extractListRelativePublished(listText) {
-  const lines = String(listText || "").split("\n").map((s) => s.trim()).filter(Boolean);
-  return lines.find((s) => /前$|ago$/i.test(s)) || "";
-}
-
-function approxRelativePublishedTime(text, now = Date.now()) {
-  const source = String(text || "").trim().toLowerCase();
-  if (!source) return null;
-  if (/刚刚|just now|seconds? ago/.test(source)) return now;
-  if (/昨天|yesterday/.test(source)) return now - 24 * 60 * 60 * 1000;
-
-  const match = source.match(/(\d+(?:\.\d+)?)\s*(秒|分钟|小时|天|周|星期|个月|月|年|seconds|secs|sec|second|minutes|mins|min|minute|hours|hrs|hr|hour|days|day|weeks|wks|wk|week|months|mos|mo|month|years|yrs|yr|year|s|d|w|h|y)/i);
-  if (!match) return null;
-  const n = Number(match[1]);
-  if (!Number.isFinite(n)) return null;
-  const unit = match[2].toLowerCase();
-  const day = 24 * 60 * 60 * 1000;
-  const multiplier =
-    /^(秒|second|seconds|sec|secs|s)$/.test(unit) ? 1000 :
-    /^(分钟|minute|minutes|min|mins)$/.test(unit) ? 60 * 1000 :
-    /^(小时|hour|hours|hr|hrs|h)$/.test(unit) ? 60 * 60 * 1000 :
-    /^(天|day|days|d)$/.test(unit) ? day :
-    /^(周|星期|week|weeks|wk|wks|w)$/.test(unit) ? 7 * day :
-    /^(个月|月|month|months|mo|mos)$/.test(unit) ? 30 * day :
-    /^(年|year|years|yr|yrs|y)$/.test(unit) ? 365 * day :
-    0;
-  return multiplier ? now - n * multiplier : null;
-}
-
-function approxRelativePublishedRange(text, now = Date.now()) {
-  const source = String(text || "").trim().toLowerCase();
-  if (!source) return null;
-  if (/刚刚|just now|seconds? ago/.test(source)) return { earliest: now - 60 * 1000, latest: now };
-  if (/昨天|yesterday/.test(source)) {
-    const day = 24 * 60 * 60 * 1000;
-    return { earliest: now - 2 * day, latest: now - day };
-  }
-
-  const match = source.match(/(\d+(?:\.\d+)?)\s*(秒|分钟|小时|天|周|星期|个月|月|年|seconds|secs|sec|second|minutes|mins|min|minute|hours|hrs|hr|hour|days|day|weeks|wks|wk|week|months|mos|mo|month|years|yrs|yr|year|s|d|w|h|y)/i);
-  if (!match) return null;
-  const n = Number(match[1]);
-  if (!Number.isFinite(n)) return null;
-  const unit = match[2].toLowerCase();
-  const day = 24 * 60 * 60 * 1000;
-  const multiplier =
-    /^(秒|second|seconds|sec|secs|s)$/.test(unit) ? 1000 :
-    /^(分钟|minute|minutes|min|mins)$/.test(unit) ? 60 * 1000 :
-    /^(小时|hour|hours|hr|hrs|h)$/.test(unit) ? 60 * 60 * 1000 :
-    /^(天|day|days|d)$/.test(unit) ? day :
-    /^(周|星期|week|weeks|wk|wks|w)$/.test(unit) ? 7 * day :
-    /^(个月|月|month|months|mo|mos)$/.test(unit) ? 30 * day :
-    /^(年|year|years|yr|yrs|y)$/.test(unit) ? 365 * day :
-    0;
-  if (!multiplier) return null;
-  return {
-    earliest: now - (n + 1) * multiplier,
-    latest: now - n * multiplier,
-  };
-}
-
-function approxRelativePublishedDate(text) {
-  const time = approxRelativePublishedTime(text);
-  if (time == null) return "";
-  return formatDateText(time);
-}
-
-function secondsToDuration(seconds) {
-  const n = Number(seconds);
-  if (!Number.isFinite(n)) return "";
-  const h = Math.floor(n / 3600);
-  const m = Math.floor((n % 3600) / 60);
-  const s = n % 60;
-  if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-async function autoAcceptYouTubeConsent(page) {
-  for (const text of ["Accept all", "I agree", "全部接受", "接受全部"]) {
-    const button = page.getByRole("button", { name: text, exact: true });
-    if (await button.count().catch(() => 0)) {
-      await button.click().catch(() => {});
-      await page.waitForTimeout(1000);
-      return;
-    }
-  }
 }
 
 async function waitForChannelReady(page, timeoutMs = 45000) {
@@ -647,123 +520,426 @@ function normalizeYouTubeResult(result, account, scrapedAt) {
   };
 }
 
+type HttpRowMeta = {
+  index: number;
+  videoId: string;
+  url: string;
+  listTitle: string;
+  durationFromList: string;
+  listViewText: string;
+  listRelativePublished: string;
+};
+
+type HttpRetryTarget = {
+  meta: HttpRowMeta;
+  session: YouTubeHttpSession;
+  isShort: boolean;
+};
+
+function httpDetailToBrowserResult(detail: YouTubeHttpVideoDetail) {
+  return {
+    videoTitle: detail.title,
+    viewCount: detail.viewCount,
+    viewCountText: detail.viewCountText,
+    likeText: detail.likeText,
+    commentText: detail.commentText,
+    publishDate: detail.publishDate,
+    uploadDate: detail.uploadDate,
+    description: detail.description,
+    durationSeconds: detail.durationSeconds,
+    channel: detail.channel,
+    isLiveContent: detail.isLive,
+  };
+}
+
+function shortResultFromDetail(meta: HttpRowMeta, detail: YouTubeHttpVideoDetail, scrapedAt: string) {
+  return {
+    index: meta.index,
+    shortId: meta.videoId,
+    url: meta.url,
+    shortTitle: detail.title,
+    listTitle: meta.listTitle,
+    listViewText: meta.listViewText,
+    viewCount: detail.viewCount,
+    viewCountText: detail.viewCountText,
+    likeButtonTitle: detail.likeText,
+    commentButtonTitle: detail.commentText,
+    publishDate: detail.publishDate,
+    uploadDate: detail.uploadDate,
+    description: detail.description,
+    durationSeconds: detail.durationSeconds,
+    channel: detail.channel,
+    scrapedAt,
+    error: "",
+  };
+}
+
+/**
+ * HTTP 抓取：浏览器打开频道页做一次引导，列表翻页、视频详情和评论数全部走 youtubei 接口。
+ * 任何环节失败都会抛出，由 createYouTubeScraper 决定是否降级到页面抓取。
+ */
+async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeResult> {
+  const source = ctx.account;
+  const args: YouTubeArgs = {
+    sinceTime: ctx.sinceTsMs,
+    untilTime: ctx.untilTsMs,
+    rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
+    limit: ctx.limit,
+    commentTimeoutMs: ctx.commentTimeoutMs ?? 30000,
+  };
+  const scrapedAt = nowInDisplayTimeZone();
+  const waitTimeoutMs = ctx.browserOptions.waitTimeoutMs || 45000;
+  const contentRows: any[] = [];
+  const retryTargets = new Map<string, HttpRetryTarget>();
+  const listLimit = args.sinceTime != null || args.untilTime != null ? 0 : args.limit;
+
+  const videosUrl = normalizeVideosUrl(source.link);
+  console.log(`[YouTube] HTTP 打开频道视频页：${source.account} ${videosUrl}`);
+  const session = await createYouTubeHttpSession(ctx.page, videosUrl, { waitTimeoutMs });
+  const list = (await collectYouTubeList(session, { limit: listLimit, sinceTime: args.sinceTime }))
+    .filter((item) => !item.isShort);
+
+  const accountRow: any = {
+    account: source.account,
+    profileUrl: source.link,
+    displayName: session.channel.displayName,
+    channelId: session.channel.channelId,
+    canonicalUrl: session.channel.canonicalUrl,
+    pageTitle: session.channel.pageTitle,
+    followersText: session.channel.followersText,
+    followingText: "",
+    postsText: session.channel.postsText,
+    error: "",
+    scrapeMode: "http",
+  };
+  console.log(`[YouTube] HTTP 频道指标：粉丝=${accountRow.followersText || "缺失"} 视频总数=${accountRow.postsText || "缺失"}`);
+  console.log(`[YouTube] HTTP 频道 ${source.account} 找到 ${list.length} 个普通视频。`);
+
+  let failedVideos = 0;
+  let consecutiveBeforeRange = 0;
+  for (const [offset, item] of list.entries()) {
+    const meta: HttpRowMeta = {
+      index: offset + 1,
+      videoId: item.videoId,
+      url: `https://www.youtube.com/watch?v=${item.videoId}`,
+      listTitle: item.title,
+      durationFromList: item.duration,
+      listViewText: item.viewText,
+      listRelativePublished: item.relativeText,
+    };
+    retryTargets.set(meta.url, { meta, session, isShort: false });
+    process.stdout.write(`[HTTP ${meta.index}/${list.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
+    try {
+      const detail = await fetchYouTubeVideoDetail(session, item.videoId, { commentTimeoutMs: args.commentTimeoutMs });
+      const row = normalizeYouTubeResult({ ...meta, ...httpDetailToBrowserResult(detail), scrapedAt }, source.account, scrapedAt);
+      const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+      if (keep) contentRows.push(row);
+      consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
+      console.log(`${keep ? "保留" : "跳过"} 观看=${detail.viewCount || "缺失"} 点赞=${detail.likeText || "缺失"} 评论=${detail.commentText || "缺失"}`);
+      if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
+        console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的视频，停止继续抓取。`);
+        break;
+      }
+    } catch (error: any) {
+      failedVideos += 1;
+      consecutiveBeforeRange = 0;
+      const message = error?.message || String(error);
+      const row = normalizeYouTubeResult({ ...meta, scrapedAt, error: message }, source.account, scrapedAt);
+      const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+      if (keep) contentRows.push(row);
+      console.log(`错误=${message}`);
+    }
+  }
+  if (list.length > 0 && failedVideos === list.length) {
+    throw new YouTubeHttpError("所有普通视频的详情请求都失败了");
+  }
+
+  const shortsUrl = normalizeShortsUrl(source.link);
+  console.log(`[YouTube] HTTP 打开频道 Shorts 页：${source.account} ${shortsUrl}`);
+  const shortsSession = await createYouTubeHttpSession(ctx.page, shortsUrl, {
+    waitTimeoutMs,
+    headers: session.headers,
+    requireItems: false,
+  });
+  if (!shortsSession.isShortsTab) {
+    console.log(`[YouTube] 频道 ${source.account} 没有 Shorts 标签页，跳过 Shorts 抓取。`);
+  } else {
+    const shortCap = listLimit;
+    const shortItems = shortsSession.items.filter((item) => item.isShort);
+    const shortSeen = new Set(shortItems.map((item) => item.videoId));
+    let shortContinuation = shortsSession.continuation;
+    let shortPages = 0;
+    let shortIndex = 0;
+    let shortAttempted = 0;
+    let shortFailed = 0;
+    let stopShorts = false;
+    let consecutiveBeforeRange = 0;
+
+    if (!shortItems.length && !shortContinuation) {
+      throw new YouTubeHttpError("Shorts 标签页没有解析到任何 Shorts");
+    }
+    console.log(`[YouTube] HTTP 频道 ${source.account} 首批找到 ${shortItems.length} 个 Shorts。`);
+
+    while (!stopShorts) {
+      for (; shortIndex < shortItems.length; shortIndex += 1) {
+        if (shortCap > 0 && shortAttempted >= shortCap) {
+          stopShorts = true;
+          break;
+        }
+
+        const item = shortItems[shortIndex];
+        const meta: HttpRowMeta = {
+          index: shortIndex + 1,
+          videoId: item.videoId,
+          url: `https://www.youtube.com/shorts/${item.videoId}`,
+          listTitle: item.title,
+          durationFromList: "",
+          listViewText: item.viewText,
+          listRelativePublished: "",
+        };
+
+        const existing = contentRows.find((row) => row.account === source.account && row.url === meta.url && !row.error);
+        if (existing) {
+          console.log(`[Shorts ${meta.index}/${shortItems.length}] 已存在，跳过 ${meta.url}`);
+          consecutiveBeforeRange = args.sinceTime != null && dateRangePosition(existing.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
+          if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
+            console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+            stopShorts = true;
+            break;
+          }
+          continue;
+        }
+
+        shortAttempted += 1;
+        retryTargets.set(meta.url, { meta, session: shortsSession, isShort: true });
+        process.stdout.write(`[Shorts ${meta.index}/${shortItems.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
+        try {
+          const detail = await fetchYouTubeVideoDetail(shortsSession, item.videoId, { commentTimeoutMs: args.commentTimeoutMs });
+          const row = normalizeYouTubeShortResult(shortResultFromDetail(meta, detail, scrapedAt), source.account, scrapedAt);
+          const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+          if (keep) contentRows.push(row);
+          consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
+          console.log(`${keep ? "保留" : "跳过"} 播放=${detail.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}`);
+          if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
+            console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+            stopShorts = true;
+            break;
+          }
+        } catch (error: any) {
+          shortFailed += 1;
+          const message = error?.message || String(error);
+          const row = normalizeYouTubeShortResult({ ...meta, shortId: meta.videoId, scrapedAt, error: message }, source.account, scrapedAt);
+          const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+          if (keep) contentRows.push(row);
+          consecutiveBeforeRange = 0;
+          console.log(`错误=${message}`);
+        }
+      }
+
+      if (stopShorts) break;
+      if (shortCap > 0 && shortAttempted >= shortCap) break;
+      if (!shortContinuation || shortPages >= YOUTUBE_MAX_LIST_PAGES) break;
+
+      const page = await fetchYouTubeContinuation(shortsSession, shortContinuation);
+      let added = 0;
+      for (const item of page.items) {
+        if (!item.isShort || shortSeen.has(item.videoId)) continue;
+        shortSeen.add(item.videoId);
+        shortItems.push(item);
+        added += 1;
+      }
+      shortContinuation = page.continuation;
+      shortPages += 1;
+      if (!added && !shortContinuation) break;
+    }
+
+    if (shortAttempted > 0 && shortFailed === shortAttempted) {
+      throw new YouTubeHttpError("所有 Shorts 的详情请求都失败了");
+    }
+    if (shortContinuation && shortPages >= YOUTUBE_MAX_LIST_PAGES) {
+      console.warn(`[YouTube] Shorts 列表达到 ${YOUTUBE_MAX_LIST_PAGES} 页上限，可能还有更早的 Shorts 没有抓取。`);
+    }
+  }
+
+  console.log(`[YouTube] HTTP 正在重试 ${source.account} 缺失数据的行，如果没有缺失会自动跳过。`);
+  for (let round = 1; round <= 2; round++) {
+    const retryRows = contentRows.filter((row) => {
+      if (row.account !== source.account) return false;
+      if (isShortsContentRow(row)) return shortRowNeedsRetry(row);
+      return Boolean(row.error)
+        || parseLocalizedNumber(row.playText) == null
+        || parseLocalizedNumber(row.likeText) == null
+        || parseLocalizedNumber(row.commentText) == null;
+    });
+    if (!retryRows.length) break;
+    console.log(`[YouTube] HTTP 第 ${round} 轮重试：${retryRows.length} 行`);
+    for (const row of retryRows) {
+      const target = retryTargets.get(row.url);
+      if (!target) continue;
+      try {
+        const detail = await fetchYouTubeVideoDetail(target.session, target.meta.videoId, {
+          commentTimeoutMs: args.commentTimeoutMs + 15000,
+        });
+        const normalized = target.isShort
+          ? normalizeYouTubeShortResult(shortResultFromDetail(target.meta, detail, row.scrapedAt), source.account, row.scrapedAt)
+          : normalizeYouTubeResult({ ...target.meta, ...httpDetailToBrowserResult(detail), scrapedAt: row.scrapedAt }, source.account, row.scrapedAt);
+        const index = contentRows.indexOf(row);
+        if (index >= 0) contentRows[index] = normalized;
+      } catch {}
+    }
+  }
+
+  const visibleRows = contentRows.filter((row) => !row.error);
+  if (visibleRows.length && visibleRows.every((row) => parseLocalizedNumber(row.playText) == null)) {
+    throw new YouTubeHttpError("HTTP 没有取到任何播放量，YouTube 接口字段可能已变化");
+  }
+
+  if (!accountRow.postsText) accountRow.postsText = String(contentRows.filter((row) => row.account === source.account).length);
+  return { accountRow, contentRows };
+}
+
 export function createYouTubeScraper(): PlatformScraper {
   return {
     code: "youtube",
     name: "YouTube",
     async scrapeAccount(ctx: AccountContext): Promise<AccountScrapeResult> {
-      const source = ctx.account;
-      const args: YouTubeArgs = {
-        sinceTime: ctx.sinceTsMs,
-        untilTime: ctx.untilTsMs,
-        rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
-        limit: ctx.limit,
-        commentTimeoutMs: ctx.commentTimeoutMs ?? 30000,
-      };
-      const scrapedAt = nowInDisplayTimeZone();
-      const contentRows: any[] = [];
-      const accountRow: any = {
-        account: source.account,
-        profileUrl: source.link,
-        followersText: "",
-        followingText: "",
-        postsText: "",
-        error: "",
-      };
-
-      const videosUrl = normalizeVideosUrl(source.link);
-      console.log(`正在打开频道视频页：${source.account} ${videosUrl}`);
-      const listLimit = args.sinceTime != null || args.untilTime != null ? 0 : args.limit;
-      const list = await collectVideoList(ctx.page, videosUrl, listLimit, args);
-      const channelMetrics = await readChannelMetrics(ctx.page, source).catch((error) => ({ error: error.message }));
-      Object.assign(accountRow, {
-        ...channelMetrics,
-        account: source.account,
-        profileUrl: source.link,
-        error: channelMetrics.error || "",
-      });
-      console.log(`频道指标：粉丝=${accountRow.followersText || "缺失"} 视频总数=${accountRow.postsText || "缺失"}`);
-      console.log(`频道 ${source.account} 找到 ${list.length} 个普通视频。`);
-
-      for (const meta of list) {
-        process.stdout.write(`[${meta.index}/${list.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
-        const result = await scrapeOneVideo(ctx.page, meta, args.commentTimeoutMs);
-        const row = normalizeYouTubeResult(result, source.account, scrapedAt);
-        const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
-        if (keep) contentRows.push(row);
-        const views = result.viewCount || "缺失";
-        const likes = result.likeText || "缺失";
-        const comments = result.commentText || "缺失";
-        console.log(`${keep ? "保留" : "跳过"} 观看=${views} 点赞=${likes} 评论=${comments}${result.error ? ` 错误=${result.error}` : ""}`);
-      }
-
-      const shortsUrl = normalizeShortsUrl(source.link);
-      console.log(`正在打开频道 Shorts 页：${source.account} ${shortsUrl}`);
-      const shortsList = await collectShortsList(ctx.page, shortsUrl, listLimit, args);
-      if (!shortsList.hasShortsTab) {
-        console.log(`频道 ${source.account} 没有 Shorts 标签页，跳过 Shorts 抓取。`);
-      } else {
-        console.log(`频道 ${source.account} 找到 ${shortsList.items.length} 个 Shorts。`);
-        let consecutiveBeforeRange = 0;
-        for (const meta of shortsList.items) {
-          const existing = contentRows.find((row) => row.account === source.account && row.url === meta.url && !row.error);
-          if (existing) {
-            console.log(`[Shorts ${meta.index}/${shortsList.items.length}] 已存在，跳过 ${meta.url}`);
-            consecutiveBeforeRange = args.sinceTime != null && dateRangePosition(existing.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-            if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-              console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
-              break;
-            }
-            continue;
-          }
-          process.stdout.write(`[Shorts ${meta.index}/${shortsList.items.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
-          const result = await scrapeOneShort(ctx.page, meta);
-          const row = normalizeYouTubeShortResult(result, source.account, scrapedAt);
-          const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
-          if (keep) contentRows.push(row);
-          consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-          console.log(`${keep ? "保留" : "跳过"} 播放=${result.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}${result.error ? ` 错误=${result.error}` : ""}`);
-          if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-            console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
-            break;
-          }
+      const mode = youtubeHttpMode();
+      if (mode !== "browser") {
+        try {
+          const result = await scrapeAccountViaHttp(ctx);
+          console.log(`[YouTube] HTTP 抓取完成：${ctx.account.account}`);
+          return result;
+        } catch (error: any) {
+          if (mode === "http") throw error;
+          console.warn(`[YouTube] HTTP 抓取失败，降级到浏览器页面抓取：${error?.message || error}`);
         }
       }
-
-      console.log(`正在重试 ${source.account} 缺失数据的行，如果没有缺失会自动跳过。`);
-      for (let round = 1; round <= 2; round++) {
-        const retryRows = contentRows.filter((row) =>
-          row.account === source.account &&
-          !isShortsContentRow(row) &&
-          (row.error || parseLocalizedNumber(row.playText) == null || parseLocalizedNumber(row.likeText) == null || parseLocalizedNumber(row.commentText) == null)
-        );
-        if (!retryRows.length) break;
-        console.log(`第 ${round} 轮重试：${retryRows.length} 行`);
-        for (const row of retryRows) {
-          const fresh = await scrapeOneVideo(ctx.page, row, args.commentTimeoutMs + 15000);
-          const normalized = normalizeYouTubeResult(fresh, source.account, scrapedAt);
-          const index = contentRows.findIndex((item) => item.account === source.account && item.url === row.url);
-          if (index >= 0) contentRows[index] = normalized;
-        }
-      }
-
-      if (shortsList.hasShortsTab) {
-        console.log(`正在重试 ${source.account} 缺失数据的 Shorts，如果没有缺失会自动跳过。`);
-        for (let round = 1; round <= 2; round++) {
-          const retryRows = contentRows.filter((row) => row.account === source.account && isShortsContentRow(row) && shortRowNeedsRetry(row));
-          if (!retryRows.length) break;
-          console.log(`Shorts 第 ${round} 轮重试：${retryRows.length} 行`);
-          for (const row of retryRows) {
-            const fresh = await scrapeOneShort(ctx.page, row);
-            const normalized = normalizeYouTubeShortResult(fresh, source.account, scrapedAt);
-            const index = contentRows.findIndex((item) => item.account === source.account && item.url === row.url);
-            if (index >= 0) contentRows[index] = normalized;
-          }
-        }
-      }
-
-      if (!accountRow.postsText) accountRow.postsText = String(contentRows.filter((row) => row.account === source.account).length);
-      return { accountRow, contentRows };
+      return scrapeAccountViaBrowser(ctx);
     },
   };
+}
+
+function youtubeHttpMode(): "auto" | "http" | "browser" {
+  const raw = String(process.env.YOUTUBE_HTTP_MODE || "").trim().toLowerCase();
+  if (!raw || raw === "auto") return "auto";
+  if (raw === "http" || raw === "only" || raw === "innertube") return "http";
+  if (raw === "browser" || raw === "page" || raw === "off") return "browser";
+  console.warn(`[YouTube] 未知 YOUTUBE_HTTP_MODE=${raw}，按 auto 处理`);
+  return "auto";
+}
+
+async function scrapeAccountViaBrowser(ctx: AccountContext): Promise<AccountScrapeResult> {
+  const source = ctx.account;
+  const args: YouTubeArgs = {
+    sinceTime: ctx.sinceTsMs,
+    untilTime: ctx.untilTsMs,
+    rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
+    limit: ctx.limit,
+    commentTimeoutMs: ctx.commentTimeoutMs ?? 30000,
+  };
+  const scrapedAt = nowInDisplayTimeZone();
+  const contentRows: any[] = [];
+  const accountRow: any = {
+    account: source.account,
+    profileUrl: source.link,
+    followersText: "",
+    followingText: "",
+    postsText: "",
+    error: "",
+  };
+
+  const videosUrl = normalizeVideosUrl(source.link);
+  console.log(`正在打开频道视频页：${source.account} ${videosUrl}`);
+  const listLimit = args.sinceTime != null || args.untilTime != null ? 0 : args.limit;
+  const list = await collectVideoList(ctx.page, videosUrl, listLimit, args);
+  const channelMetrics = await readChannelMetrics(ctx.page, source).catch((error) => ({ error: error.message }));
+  Object.assign(accountRow, {
+    ...channelMetrics,
+    account: source.account,
+    profileUrl: source.link,
+    error: channelMetrics.error || "",
+  });
+  console.log(`频道指标：粉丝=${accountRow.followersText || "缺失"} 视频总数=${accountRow.postsText || "缺失"}`);
+  console.log(`频道 ${source.account} 找到 ${list.length} 个普通视频。`);
+
+  for (const meta of list) {
+    process.stdout.write(`[${meta.index}/${list.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
+    const result = await scrapeOneVideo(ctx.page, meta, args.commentTimeoutMs);
+    const row = normalizeYouTubeResult(result, source.account, scrapedAt);
+    const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+    if (keep) contentRows.push(row);
+    const views = result.viewCount || "缺失";
+    const likes = result.likeText || "缺失";
+    const comments = result.commentText || "缺失";
+    console.log(`${keep ? "保留" : "跳过"} 观看=${views} 点赞=${likes} 评论=${comments}${result.error ? ` 错误=${result.error}` : ""}`);
+  }
+
+  const shortsUrl = normalizeShortsUrl(source.link);
+  console.log(`正在打开频道 Shorts 页：${source.account} ${shortsUrl}`);
+  const shortsList = await collectShortsList(ctx.page, shortsUrl, listLimit, args);
+  if (!shortsList.hasShortsTab) {
+    console.log(`频道 ${source.account} 没有 Shorts 标签页，跳过 Shorts 抓取。`);
+  } else {
+    console.log(`频道 ${source.account} 找到 ${shortsList.items.length} 个 Shorts。`);
+    let consecutiveBeforeRange = 0;
+    for (const meta of shortsList.items) {
+      const existing = contentRows.find((row) => row.account === source.account && row.url === meta.url && !row.error);
+      if (existing) {
+        console.log(`[Shorts ${meta.index}/${shortsList.items.length}] 已存在，跳过 ${meta.url}`);
+        consecutiveBeforeRange = args.sinceTime != null && dateRangePosition(existing.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
+        if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
+          console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+          break;
+        }
+        continue;
+      }
+      process.stdout.write(`[Shorts ${meta.index}/${shortsList.items.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
+      const result = await scrapeOneShort(ctx.page, meta);
+      const row = normalizeYouTubeShortResult(result, source.account, scrapedAt);
+      const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+      if (keep) contentRows.push(row);
+      consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
+      console.log(`${keep ? "保留" : "跳过"} 播放=${result.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}${result.error ? ` 错误=${result.error}` : ""}`);
+      if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
+        console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+        break;
+      }
+    }
+  }
+
+  console.log(`正在重试 ${source.account} 缺失数据的行，如果没有缺失会自动跳过。`);
+  for (let round = 1; round <= 2; round++) {
+    const retryRows = contentRows.filter((row) =>
+      row.account === source.account &&
+      !isShortsContentRow(row) &&
+      (row.error || parseLocalizedNumber(row.playText) == null || parseLocalizedNumber(row.likeText) == null || parseLocalizedNumber(row.commentText) == null)
+    );
+    if (!retryRows.length) break;
+    console.log(`第 ${round} 轮重试：${retryRows.length} 行`);
+    for (const row of retryRows) {
+      const fresh = await scrapeOneVideo(ctx.page, row, args.commentTimeoutMs + 15000);
+      const normalized = normalizeYouTubeResult(fresh, source.account, scrapedAt);
+      const index = contentRows.findIndex((item) => item.account === source.account && item.url === row.url);
+      if (index >= 0) contentRows[index] = normalized;
+    }
+  }
+
+  if (shortsList.hasShortsTab) {
+    console.log(`正在重试 ${source.account} 缺失数据的 Shorts，如果没有缺失会自动跳过。`);
+    for (let round = 1; round <= 2; round++) {
+      const retryRows = contentRows.filter((row) => row.account === source.account && isShortsContentRow(row) && shortRowNeedsRetry(row));
+      if (!retryRows.length) break;
+      console.log(`Shorts 第 ${round} 轮重试：${retryRows.length} 行`);
+      for (const row of retryRows) {
+        const fresh = await scrapeOneShort(ctx.page, row);
+        const normalized = normalizeYouTubeShortResult(fresh, source.account, scrapedAt);
+        const index = contentRows.findIndex((item) => item.account === source.account && item.url === row.url);
+        if (index >= 0) contentRows[index] = normalized;
+      }
+    }
+  }
+
+  if (!accountRow.postsText) accountRow.postsText = String(contentRows.filter((row) => row.account === source.account).length);
+  accountRow.scrapeMode = "browser";
+  return { accountRow, contentRows };
 }

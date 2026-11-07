@@ -56,10 +56,13 @@ async function markTask(
 async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<ReturnType<typeof claimNextTask>>): Promise<void> {
   if (!task) return;
   const accountType = String(task.accountType || "").trim();
-  if (!accountType) {
+  const categoryId = String(task.categoryId || "").trim() || undefined;
+  const categoryName = String(task.categoryName || "").trim();
+  if (!accountType && !categoryId) {
     await markTask(handle, task.id, "failed", null, "任务缺少账号类型");
     return;
   }
+  const typeLabel = categoryName || accountType;
   const params = task.params || {};
   let window = taskWindow(params);
   const limit = Number(params.limit || 0);
@@ -72,13 +75,14 @@ async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<Re
   const accounts = await loadPlatformAccounts({
     db: handle.db,
     platformCode: task.platformCode,
-    accountType,
+    accountType: accountType || undefined,
+    categoryId,
     account,
     accountIds,
     limit: 0,
   });
   if (!accounts.length) {
-    await markTask(handle, task.id, "failed", null, `账号类型 ${accountType} 下没有可用账号`);
+    await markTask(handle, task.id, "failed", null, `账号类型 ${typeLabel} 下没有可用账号`);
     return;
   }
 
@@ -135,9 +139,9 @@ async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<Re
     level: "info",
     step: "task_start",
     message: `任务 ${task.id} 开始执行 ${definition.name}`,
-    context: { taskId: task.id, platform: definition.code, accountType, account, accounts: accounts.length, limit },
+    context: { taskId: task.id, platform: definition.code, accountType: typeLabel, account, accounts: accounts.length, limit },
   });
-  console.log(`[worker] 任务 ${task.id} -> ${definition.name} / ${accountType}，账号 ${accounts.length} 个`);
+  console.log(`[worker] 任务 ${task.id} -> ${definition.name} / ${typeLabel}，账号 ${accounts.length} 个`);
 
   const started = Date.now();
   let errorMessage: string | null = null;
@@ -150,7 +154,7 @@ async function runTask(handle: ReturnType<typeof openDatabase>, task: Awaited<Re
         taskDateKey,
         sinceTsMs: window.start,
         untilTsMs: window.end,
-        accountType,
+        accountType: typeLabel,
         limit,
         commentTimeoutMs: Number(params.commentTimeoutMs || 30000),
         logger: consoleLogger(definition.code),
