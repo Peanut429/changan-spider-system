@@ -206,3 +206,14 @@ export type CreateTaskInput = {
   windowEnd: string
   limit: number
 }
+
+/** One create submission can fan out into one task per selected platform. */
+export type CreateTasksInput = Omit<CreateTaskInput, 'platformId'> & {
+  platformIds: string[]
+}
+
+export type AccountTypesResponse = {
+  accountTypes: string[]
+  /** 账号类型 → 平台 ID → 启用账号数，用于默认选中“有账号的平台” */
+  platformCounts: Record<string, Record<string, number>>
+}

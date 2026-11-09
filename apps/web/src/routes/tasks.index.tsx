@@ -38,6 +38,8 @@ type TasksSearch = { date: string }
 type GroupBy = 'none' | 'platform' | 'accountType'
 
 const GROUP_STORAGE_KEY = 'changan.tasks.group'
+/** Stable empty value so the dialog effect does not reset while data loads. */
+const NO_PLATFORM_COUNTS: Record<string, Record<string, number>> = {}
 const UNCLASSIFIED = '__unclassified__'
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: '不分组' },
@@ -650,10 +652,14 @@ function TasksPage() {
     }
   }
 
-  const handleSaved = (task: Task) => {
+  const handleSaved = (tasks: Task[]) => {
+    const task = tasks[0]
+    if (!task) return
     const taskDate = task.scheduledAt ? dateKeyFromDate(new Date(task.scheduledAt)) : date
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    for (const item of tasks) {
+      void queryClient.invalidateQueries({ queryKey: ['task', item.id] })
+    }
     if (taskDate !== date) {
       navigate({ to: '/tasks', search: { date: taskDate } })
     }
@@ -844,6 +850,7 @@ function TasksPage() {
         }}
         platforms={platformsQuery.data?.platforms ?? []}
         accountTypes={accountTypesQuery.data?.accountTypes ?? []}
+        platformCounts={accountTypesQuery.data?.platformCounts ?? NO_PLATFORM_COUNTS}
         defaultDate={date}
         onSaved={handleSaved}
       />

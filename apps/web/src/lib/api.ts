@@ -2,15 +2,20 @@ import type {
   Account,
   AccountInput,
   AccountListResponse,
+  AccountTypesResponse,
   Platform,
   CreateTaskInput,
+  CreateTasksInput,
   Task,
   TaskDetailResponse,
   TaskListResponse,
 } from './types'
 
+// 部署在子路径时（BASE_PATH=/changan-data），接口也要带前缀
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(`${base}${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -60,7 +65,7 @@ export function getPlatforms() {
 }
 
 export function getAccountTypes() {
-  return request<{ accountTypes: string[] }>('/api/account-types')
+  return request<AccountTypesResponse>('/api/account-types')
 }
 
 export function getAccounts(filters: {
@@ -103,8 +108,8 @@ export function updateAccountActive(id: string, active: boolean) {
   })
 }
 
-export function createTask(input: CreateTaskInput) {
-  return request<{ task: Task }>('/api/tasks', {
+export function createTasks(input: CreateTasksInput) {
+  return request<{ task: Task; tasks: Task[] }>('/api/tasks', {
     method: 'POST',
     body: JSON.stringify(input),
   })

@@ -109,6 +109,9 @@ pnpm build:web
 
 Linux 服务器 + pm2 的完整步骤见 [DEPLOY.md](./DEPLOY.md)，配套文件：
 
-- `ecosystem.config.cjs`：pm2 进程定义（web cluster 2 实例、worker 单实例）
+- `ecosystem.config.cjs`：pm2 配置示例（单实例，`cwd` 指向产物目录）
 - `deploy/nginx.conf`：nginx 反代示例
-- `deploy/deploy.sh`：拉代码 → 构建 → reload → 健康检查
+- `deploy/deploy.sh`：服务器上发布（拉代码 → 构建 → reload → 健康检查）
+- `deploy/pack.sh` + `deploy/activate.sh`：本地构建、推产物到服务器发布（服务器不放代码，支持 `--list` / `--rollback`）
+
+两种发布方式的环境和 pm2 配置一致，差别只在产物从哪来，详见 DEPLOY.md 第 10 节。

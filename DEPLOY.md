@@ -6,7 +6,7 @@
 ## 0. 部署形态
 
 ```text
-浏览器 ──HTTPS──> nginx :443 ──> 127.0.0.1:3000 ──> pm2: changan-web（Nitro node-server，2 实例）
+浏览器 ──HTTPS──> nginx :443 ──> 127.0.0.1:3000 ──> pm2: changan-web（Nitro node-server，单实例）
                                                           │
                                                           └──> PostgreSQL（本机或阿里云 RDS）
 
@@ -17,7 +17,16 @@ pm2: changan-worker（可选，无端口）──轮询 scrape_tasks──> Post
 两个关键事实，决定了下面的所有步骤：
 
 1. **Web 的产物是 `apps/web/.output`**（Nitro `node-server` 预设），启动入口就是 `apps/web/.output/server/index.mjs`，只认 `PORT` / `NITRO_PORT` 和 `HOST` 环境变量。
-2. **产物在运行时不会读取 `.env`**，只有构建时才会。所以 `DATABASE_URL` 必须由 pm2 注入进程环境——`ecosystem.config.cjs` 已经做了这件事。
+2. **产物在运行时不会读取 `.env`**，只有构建时才会。所以 `DATABASE_URL` 必须写在 pm2 配置的 `env` 里（或启动前 export），否则 `/changan-data/api/health` 返回 400。
+
+部署方式二选一，后续步骤完全共用（pm2、nginx 配置一样），只是“产物从哪来”不同：
+
+| 方式 | 服务器上要不要代码 | 适合 |
+| --- | --- | --- |
+| **A. 服务器拉代码构建** | 要，完整仓库 | 想一键 `git pull` 发布；爬虫也跑在服务器上 |
+| **B. 本地构建推产物** | 不要，只有 `.output` | 不想在服务器装 Node 构建链；爬虫留在本机 |
+
+方式 A 看第 3~6 节 + 10.1，方式 B 直接看 **10.2**（服务器仍需装 Node 24 和 pm2，不需要装代码和依赖）。
 
 ## 1. 服务器准备
 
@@ -83,7 +92,7 @@ pg_dump --schema-only --no-owner --no-privileges "$OLD_DATABASE_URL" > /tmp/sche
 psql "$NEW_DATABASE_URL" -f /tmp/schema.sql
 ```
 
-## 3. 拉代码
+## 3. 拉代码（方式 A；方式 B 跳过）
 
 ```bash
 su - deploy
@@ -92,11 +101,14 @@ cd /srv/changan
 pnpm install --frozen-lockfile
 ```
 
-仓库根目录的 `package.json` 是 monorepo 入口，**不要**进 `apps/web` 里单独 install/install 脚本。
+仓库根目录的 `package.json` 是 monorepo 入口，**不要**进 `apps/web` 里单独 install 脚本。
+只推产物的方式 B 不需要这一节，但**仍然要建目录**：`mkdir -p /srv/changan/apps/web`，`.env` 放这里。
 
 ## 4. 环境变量
 
 按仓库约定，每个 app 读自己的 `.env`：
+
+（方式 B 没有仓库，直接 `mkdir -p /srv/changan/apps/web` 后把同样的内容写进 `/srv/changan/apps/web/.env`。）
 
 ```bash
 cd /srv/changan
@@ -115,10 +127,9 @@ SCRAPE_TIMEZONE=Asia/Shanghai
 
 `apps/crawler/.env` 还要补浏览器相关变量，见第 9 节。
 
-> `ecosystem.config.cjs` 会在 `pm2 start` 时解析这两个 `.env` 并注入进程环境（Nitro 运行时不会自己读 `.env`）。
-> 因此**改完 `.env` 必须 `pm2 reload ecosystem.config.cjs --update-env`**，只重启进程不会重新读取文件。
+> `.env` 只是给人看的模板：Nitro 产物运行时不读它，pm2 也不读。**实际生效的是 `ecosystem.config.cjs` 的 `env` 块**，改完要 `pm2 reload changan-web --update-env`。
 
-## 5. 构建
+## 5. 构建（方式 A 在服务器；方式 B 在本地，见 10.2）
 
 ```bash
 cd /srv/changan
@@ -132,19 +143,19 @@ ls apps/web/.output/server/index.mjs
 ```bash
 cd apps/web
 PORT=3999 HOST=127.0.0.1 DATABASE_URL="postgres://u:p@127.0.0.1:1/x" node .output/server/index.mjs
-# 另一个终端：curl http://127.0.0.1:3999/api/health   → {"ok":true}
+# 另一个终端：curl http://127.0.0.1:3999/changan-data/api/health   → {"ok":true}
 ```
 
 ## 6. 用 pm2 常驻
 
-仓库根目录已经带了 `ecosystem.config.cjs`（web 2 实例 cluster + worker 单实例 fork，worker 默认 `autostart: false`）。
+`ecosystem.config.cjs` 是单实例 fork，`cwd` 指向产物所在目录（只推产物时是 `/srv/changan/web`，跑整个仓库时是 `/srv/changan/apps/web`）。
 
 ```bash
 cd /srv/changan
-pm2 start ecosystem.config.cjs        # 只起 changan-web
+pm2 start ecosystem.config.cjs
 pm2 ls
 pm2 logs changan-web
-curl http://127.0.0.1:3000/api/health
+curl http://127.0.0.1:3010/changan-data/api/health
 ```
 
 验证无误后固化开机自启：
@@ -159,15 +170,15 @@ pm2 save                                          # 再 save 一次，确保 dum
 
 | 目的 | 命令 |
 | --- | --- |
-| 平滑重载（cluster 下接近零停机） | `pm2 reload ecosystem.config.cjs --update-env` |
-| 只重载 web | `pm2 reload ecosystem.config.cjs --only changan-web --update-env` |
+| 重载（单实例=重启，约 1 秒中断） | `pm2 reload changan-web --update-env` |
+| 重新读取 `ecosystem.config.cjs` | `pm2 delete changan-web && pm2 start ecosystem.config.cjs` |
 | 重启 | `pm2 restart changan-web` |
 | 停止 / 删除 | `pm2 stop changan-web` / `pm2 delete changan-web` |
 | 看状态 | `pm2 ls` / `pm2 monit` |
 | 看日志 | `pm2 logs changan-web --lines 200` |
 | 日志切割（强烈建议） | `pm2 install pm2-logrotate` |
 
-> 只启动 worker：`pm2 start ecosystem.config.cjs --only changan-worker`。
+> 需要 worker 时，在 `ecosystem.config.cjs` 里加第二段（见第 9 节）。
 
 ## 7. nginx 反向代理
 
@@ -193,12 +204,66 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d 你的域名
 ```
 
+## 7.1 部署在子路径（/changan-data）
+
+nginx 要挂在 `/changan-data/` 下时，**不能靠 nginx 剥前缀**：TanStack Router 的 SSG/SSR 匹配、
+客户端路由、静态资源地址、`fetch('/api/...')` 都按根路径硬编码。正确做法是让应用自己知道前缀。
+
+一处配置：
+
+```dotenv
+# apps/web/.env
+BASE_PATH=/changan-data
+```
+
+它会在 `pnpm build:web` 时被读到，同时作用于：
+
+| 位置 | 作用 |
+| --- | --- |
+| `vite base` | HTML 里的 `/changan-data/assets/xxx.js` |
+| `nitro baseURL` | 服务端在 `/changan-data/` 下提供静态资源 |
+| `import.meta.env.BASE_URL` → router `basepath` | 页面路由、`Link`、`navigate`、重定向 Location |
+| `src/lib/api.ts` | 所有接口请求自动加前缀 |
+| `__root.tsx` favicon | 图标路径 |
+
+**前缀是编译期常量**：改 `BASE_PATH` 必须重新 `pnpm build:web`，只重启 pm2 没用。
+本地 `pnpm dev:web` 的地址也会变成 `http://localhost:3000/changan-data/`。
+
+nginx 侧原样转发即可，关键是 `proxy_pass` **末尾不要加 `/`**（加了就会剥前缀）：
+
+```nginx
+location = /changan-data { return 301 /changan-data/; }
+
+location /changan-data/ {
+    proxy_pass http://127.0.0.1:3010;   # 注意没有结尾斜杠
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /changan-data;
+}
+
+location /changan-data/assets/ {
+    proxy_pass http://127.0.0.1:3010;
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+}
+```
+
+完整文件见 `deploy/nginx.conf`。
+
+验证（不经过 nginx，直接打应用）：
+
+```bash
+curl -i http://127.0.0.1:3010/changan-data/api/health    # 200 {"ok":true}
+curl -i http://127.0.0.1:3010/changan-data/tasks         # 307 → /changan-data/tasks?date=...
+curl -I http://127.0.0.1:3010/changan-data/assets/index-xxx.js   # 200
+```
+
 ## 8. 验收清单
 
 ```bash
 curl -I https://你的域名/                      # 200，或 307 跳到 /tasks
-curl -s https://你的域名/api/health            # {"ok":true}
-curl -s "https://你的域名/api/platforms"       # 能读到数据 → 服务器到 DB 通
+curl -s https://你的域名/changan-data/api/health            # {"ok":true}
+curl -s "https://你的域名/changan-data/api/platforms"       # 能读到数据 → 服务器到 DB 通
 pm2 ls                                        # 2 个 changan-web 实例 online
 pm2 logs changan-web --lines 50 --nostream    # 没有 500 / ECONNREFUSED
 sudo tail -f /var/log/nginx/changan.error.log
@@ -250,11 +315,17 @@ worker 用 `node --experimental-strip-types` 直接跑 TS，不需要构建，�
 4. 启动并观察：
 
    ```bash
-   pm2 start ecosystem.config.cjs --only changan-worker
+   cd /srv/changan/apps/crawler
+   pm2 start src/main/worker.ts --name changan-worker \
+     --interpreter node --node-args="--experimental-strip-types"
    pm2 logs changan-worker --lines 100
    ```
 
-## 10. 日常发布
+## 10. 发布
+
+两种方式选一种即可，pm2 / nginx 配置完全相同，区别只是产物从哪来。
+
+### 10.1 方式 A：服务器上拉代码构建
 
 ```bash
 chmod +x deploy/deploy.sh      # 首次
@@ -264,18 +335,69 @@ cd /srv/changan && ./deploy/deploy.sh
 脚本流程：`git pull` → `pnpm install --frozen-lockfile` → `pnpm build:web` → `pm2 reload --update-env` → 轮询 `/api/health`。
 构建失败会在 reload 之前退出，线上旧版本继续服务。
 
-如果不希望服务器装构建工具链，也可以本地/CI 构建后只传产物（产物自带依赖）：
+### 10.2 方式 B：本地构建，推产物（服务器不放代码）
+
+`.output` 是自包含的：纯 JS、无原生二进制、运行时只用 Node 内置模块，所以 **Mac 上构建、Linux 上跑没问题**。
+唯一约束是产物按 Node 24 打包，服务器也要 Node 24。
+
+服务器上的目录结构（`deploy/pack.sh` 首次运行会自动建好 releases 部分）：
+
+```text
+/srv/changan/
+├── ecosystem.config.cjs        # 首次自动上传，之后可用 --push-config 覆盖
+├── apps/web/.env               # 常驻配置，不随发布覆盖（需手动建一次）
+├── current -> releases/20261109-112208
+└── releases/
+    ├── 20261109-112208/apps/web/.output/...    # 当前版本
+    └── 20261108-201000/apps/web/.output/...    # 上一个版本，回滚用
+```
+
+首次准备（只做一次）：
 
 ```bash
-rsync -avz --delete apps/web/.output/ deploy@server:/srv/changan/apps/web/.output/
-ssh deploy@server 'cd /srv/changan && pm2 reload ecosystem.config.cjs --only changan-web'
+ssh deploy@server 'mkdir -p /srv/changan/apps/web'
+ssh deploy@server 'vi /srv/changan/apps/web/.env'    # 参照 4 节填 DATABASE_URL
 ```
+
+之后每次发布：
+
+```bash
+SERVER=deploy@server ./deploy/pack.sh
+```
+
+它做的事：本地 `pnpm build:web` → tar 打包 `.output` → ssh 传到 `releases/<时间戳>/`
+→ 切 `current` 软链 → `pm2 startOrReload --only changan-web` → 轮询 `/api/health`
+→ **健康检查失败自动切回上一个版本** → 清理旧版本（默认保留 5 个）。
+
+| 命令 | 作用 |
+| --- | --- |
+| `SERVER=... ./deploy/pack.sh` | 构建并发布 |
+| `SERVER=... ./deploy/pack.sh --skip-build` | 不重新构建，直接推现有 `.output` |
+| `SERVER=... ./deploy/pack.sh --push-config` | 同时覆盖服务器上的 `ecosystem.config.cjs` |
+| `SERVER=... ./deploy/pack.sh --list` | 列出服务器上的版本和当前版本 |
+| `SERVER=... ./deploy/pack.sh --rollback 20261108-201000` | 切回指定版本（不重新构建） |
+| `KEEP=10 SERVER=... ./deploy/pack.sh` | 保留 10 个历史版本 |
+
+必须知道的限制：
+
+- **worker 不能这样部署**。它直接跑 `src/main/worker.ts`（Node 的 TS 类型擦除），没有构建产物，也依赖 workspace 软链和 `node_modules`。
+  爬虫要放服务器，就得用方式 A 把仓库放上去，或者 `rsync` 整个仓库后再 `pnpm install`。
+- 产物纯 JS 才能跨平台。**以后引入原生模块**（`sharp`、`better-sqlite3`、`bcrypt` 之类）就必须在 Linux 上构建（Docker 或 CI），
+  因为 `.node` 二进制和平台绑定，Mac 编出来的在服务器上会 `invalid ELF header`。
+- 回滚只切软链 + reload，秒级完成，但**数据库结构变更不会跟着回滚**，改表前先评估。
+- 服务器上不需要 `pnpm install`，也就没有 `node_modules`；pm2 启动的就是 `current/apps/web/.output/server/index.mjs`。
+
+### 10.3 CI 里怎么做
+
+`pack.sh` 的每一步都可以拆到 CI：`pnpm install --frozen-lockfile && pnpm build:web`，
+然后把 `apps/web/.output` 传到 `releases/<git-sha>/`，最后 `ssh` 执行 `deploy/activate.sh`
+（`REMOTE_DIR=... RELEASE=<git-sha> bash activate.sh`）即可，回滚时把 `RELEASE` 换成上一个 sha。
 
 ## 11. 故障排查
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| `/api/health` 返回 400 `缺少 DATABASE_URL` | pm2 没注入环境变量。确认 `apps/web/.env` 存在且 `pm2 reload ... --update-env`；`pm2 env 0` 可以看到实际环境 |
+| `/changan-data/api/health` 返回 400 `缺少 DATABASE_URL` | pm2 没注入环境变量。确认 `apps/web/.env` 存在且 `pm2 reload ... --update-env`；`pm2 env 0` 可以看到实际环境 |
 | 改了 `.env` 不生效 | `.env` 只在 `pm2 start/reload` 读配置时解析，必须带 `--update-env`，或 `pm2 delete` 后重新 start |
 | nginx 502 | web 没起来或不在 3000。`pm2 logs changan-web`、`ss -lntp \| grep 3000` |
 | `EADDRINUSE` | 本机已有进程占 3000（比如误跑了 `pnpm dev:web`）；或 `.env` 里的 `PORT` 和 nginx upstream 不一致 |
@@ -285,11 +407,16 @@ ssh deploy@server 'cd /srv/changan && pm2 reload ecosystem.config.cjs --only cha
 | worker 报 `Missing X server or $DISPLAY` | 没装 Xvfb 或没设 `DISPLAY=:99`（见第 9 节） |
 | worker 报 Chrome 沙箱错误 | 用非 root 用户跑 pm2；确需 root 才加 `--no-sandbox` |
 | 连不上 RDS | 服务器出口 IP 没进 RDS 白名单，或安全组未放行 5432 出方向 |
-| 用 nvm 升级 Node 后 pm2 起不来 | `ecosystem.config.cjs` 把 `process.execPath` 写死进进程配置，旧路径失效。`pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save`，再重跑一次 `pm2 startup` |
+| 推了产物但页面还是旧的 | 没跑 `activate.sh`（它才切软链 + reload）；或 `pm2 reload` 时 `--only` 写错应用名 |
+| 产物在服务器启动报 `invalid ELF header` | 构建时引入了原生模块，改在 Linux/CI 上构建 |
+| `/srv/changan/current` 存在但 pm2 进程 cwd 是旧的 | `pm2 describe changan-web \| grep exec cwd` 确认；必要时 `pm2 delete changan-web` 后重新 start |
+| 用 nvm 升级 Node 后 pm2 起不来 | pm2 守护进程绑的是旧的 node 路径，`pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save`，再重跑一次 `pm2 startup` |
 
 ## 12. 注意
 
 - `pnpm dev:web` 只用于开发（HMR、devtools），线上永远跑 `.output/server/index.mjs`。
 - 同一台机器不要再起第二个 worker：会抢同一个 Chrome profile。
 - `apps/web/.output` 和 `.env` 都在 `.gitignore` 里，部署后不要指望 `git pull` 带来它们。
+- 方式 B 的 `current` 是软链，`releases/` 才是实体目录；排查问题时 `readlink -f /srv/changan/current` 定位真实路径。
+- 方式 B 的服务器上直接改 `/srv/changan/apps/web/.env` 即可，不要改到 `releases/*/apps/web/.env`（不存在，也不该存在）。
 - 目前没有自动迁移脚本，DB 结构变更仍靠 `apps/crawler/db/*.sql` 手工执行。

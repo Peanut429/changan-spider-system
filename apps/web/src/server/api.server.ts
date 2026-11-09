@@ -178,6 +178,7 @@ type CoverageLike = {
   failed?: number;
   newAccounts?: number;
   running?: number;
+  contentCount?: number;
 };
 
 /**
@@ -215,6 +216,11 @@ function applyCoverage(task: Json, coverage: CoverageLike): Json {
   task.failedAccounts = Number(coverage.failed || 0);
   task.newAccounts = Number(coverage.newAccounts || 0);
   task.coverageTotal = Number(coverage.total || 0);
+  // A retry lives in a child task with its own run, so the parent run's
+  // content_metric_count stays at whatever the first attempt saved. The rows
+  // the detail page shows come from every run, so the list has to use that
+  // same count instead of the stale first-run value.
+  if (coverage.contentCount != null) task.contentMetricCount = Number(coverage.contentCount);
   const resolved = resolveTaskStatus(task, coverage);
   task.status = resolved.status;
   task.runStatus = resolved.runStatus;
@@ -251,8 +257,8 @@ const taskSelect = `
 `;
 
 
+/** Fields shared by every task in a batch; platforms are validated separately. */
 function parseTaskFields(body: Json) {
-  const platformId = text(body.platformId);
   const accountType = text(body.accountType) || null;
   const scheduledAtRaw = text(body.scheduledAt);
   const windowStart = text(body.windowStart);
@@ -260,7 +266,6 @@ function parseTaskFields(body: Json) {
   const limit = Number(body.limit ?? 0);
   const priority = Number(body.priority ?? 100);
 
-  if (!platformId) throw new Error("请选择平台");
   if (!scheduledAtRaw) throw new Error("请选择计划执行时间");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(windowStart) || !/^\d{4}-\d{2}-\d{2}$/.test(windowEnd)) {
     throw new Error("抓取时间范围必须是 YYYY-MM-DD");
@@ -274,7 +279,6 @@ function parseTaskFields(body: Json) {
   const windowEndTsMs = endOfDayInTimeZone(Number(windowEnd.replace(/-/g, "")), TIME_ZONE);
 
   return {
-    platformId,
     accountType,
     scheduledAtMs,
     since: windowStart,
@@ -286,35 +290,76 @@ function parseTaskFields(body: Json) {
   };
 }
 
-async function createTask(pool: any, body: Json): Promise<Json> {
+/**
+ * Create one task per selected platform in a single transaction. A task only
+ * ever targets one platform (that is the unit the worker claims and executes),
+ * so "all platforms" means a batch of sibling tasks created together.
+ */
+async function createTasks(pool: any, body: Json): Promise<Json[]> {
   const fields = parseTaskFields(body);
 
-  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [fields.platformId]);
-  if (!platform.rows.length) throw new Error("平台不存在或已停用");
+  const rawIds = Array.isArray(body.platformIds)
+    ? body.platformIds
+    : body.platformId
+      ? [body.platformId]
+      : [];
+  const platformIds = [...new Set(rawIds.map(text).filter(Boolean))];
+  if (!platformIds.length) throw new Error("请选择平台");
+  if (platformIds.length > 50) throw new Error("一次最多创建 50 个平台任务");
 
-  // Tasks target one type, but the type is resolved to the category so task
-  // account selection follows memberships (an account can be in several types).
-  const category = fields.accountType ? await ensureCategory(pool, fields.accountType) : null;
-
-  const id = prefixedId("task");
-  const now = Date.now();
-  await pool.query(
-    `insert into scrape_tasks(
-       id, platform_id, category_id, account_type, params, priority, status,
-       scheduled_at_ms, lease_owner, lease_until_ms, attempts, run_id, last_error,
-       created_ts_ms, updated_ts_ms
-     ) values ($1, $2, $3, null, $4::jsonb, $5, 'pending', $6, null, null, 0, null, null, $7, $7)`,
-    [id, fields.platformId, category?.id ?? null, JSON.stringify({
-      since: fields.since,
-      until: fields.until,
-      limit: fields.limit,
-      timezone: TIME_ZONE,
-      windowStartTsMs: fields.windowStartTsMs,
-      windowEndTsMs: fields.windowEndTsMs,
-    }), fields.priority, fields.scheduledAtMs, now],
+  const platformResult = await pool.query(
+    "select id, name, enabled from platforms where id = any($1::text[])",
+    [platformIds],
   );
-  const created = await pool.query(`${taskSelect} where t.id = $1`, [id]);
-  return taskRow(created.rows[0]);
+  const byId = new Map<string, any>(platformResult.rows.map((row: any) => [row.id, row]));
+  const unavailable = platformIds.filter((id) => {
+    const platform = byId.get(id);
+    return !platform || !platform.enabled;
+  });
+  if (unavailable.length) {
+    throw new Error(`平台不存在或已停用：${unavailable.map((id) => byId.get(id)?.name || id).join("、")}`);
+  }
+
+  const params = {
+    since: fields.since,
+    until: fields.until,
+    limit: fields.limit,
+    timezone: TIME_ZONE,
+    windowStartTsMs: fields.windowStartTsMs,
+    windowEndTsMs: fields.windowEndTsMs,
+  };
+
+  const client = await pool.connect();
+  const taskIds: string[] = [];
+  try {
+    await client.query("begin");
+    // Tasks target one type, but the type is resolved to the category so task
+    // account selection follows memberships (an account can be in several types).
+    const category = fields.accountType ? await ensureCategory(client, fields.accountType) : null;
+    const now = Date.now();
+    for (const platformId of platformIds) {
+      const id = prefixedId("task");
+      taskIds.push(id);
+      await client.query(
+        `insert into scrape_tasks(
+           id, platform_id, category_id, account_type, params, priority, status,
+           scheduled_at_ms, lease_owner, lease_until_ms, attempts, run_id, last_error,
+           created_ts_ms, updated_ts_ms
+         ) values ($1, $2, $3, null, $4::jsonb, $5, 'pending', $6, null, null, 0, null, null, $7, $7)`,
+        [id, platformId, category?.id ?? null, JSON.stringify(params), fields.priority, fields.scheduledAtMs, now],
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const created = await pool.query(`${taskSelect} where t.id = any($1::text[])`, [taskIds]);
+  const rows = new Map(created.rows.map((row: any) => [row.id, row]));
+  return taskIds.map((id) => taskRow(rows.get(id))).filter(Boolean);
 }
 
 type UpdateTaskResult =
@@ -332,7 +377,9 @@ async function updateTask(pool: any, id: string, body: Json): Promise<UpdateTask
   }
 
   const fields = parseTaskFields(body);
-  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [fields.platformId]);
+  const platformId = text(body.platformId);
+  if (!platformId) throw new Error("请选择平台");
+  const platform = await pool.query("select id from platforms where id = $1 and enabled = true", [platformId]);
   if (!platform.rows.length) throw new Error("平台不存在或已停用");
   const category = fields.accountType ? await ensureCategory(pool, fields.accountType) : null;
 
@@ -361,7 +408,7 @@ async function updateTask(pool: any, id: string, body: Json): Promise<UpdateTask
             updated_ts_ms = $7
       where id = $1 and status in ('pending','paused')
       returning id`,
-    [id, fields.platformId, category?.id ?? null, JSON.stringify(params), priority, fields.scheduledAtMs, now],
+    [id, platformId, category?.id ?? null, JSON.stringify(params), priority, fields.scheduledAtMs, now],
   );
   if (!updated.rows.length) return { kind: "conflict", message: "任务已经开始执行，无法编辑" };
 
@@ -377,7 +424,7 @@ async function listTasks(pool: any, date: string): Promise<Json> {
       where t.status in ('pending', 'paused')
         and t.params->>'parentTaskId' is null
         and (to_timestamp(t.scheduled_at_ms / 1000) at time zone $2)::date = $1::date
-      order by t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc`,
+      order by t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc, p.name`,
     [date, TIME_ZONE],
   );
   // Group by the day the task was planned for, exactly like pending. If a task
@@ -389,7 +436,7 @@ async function listTasks(pool: any, date: string): Promise<Json> {
       where t.status in ('running', 'success', 'failed', 'cancelled')
         and t.params->>'parentTaskId' is null
         and (to_timestamp(t.scheduled_at_ms / 1000) at time zone $2)::date = $1::date
-      order by coalesce(r.started_ts_ms, t.scheduled_at_ms) asc, t.priority asc`,
+      order by coalesce(r.started_ts_ms, t.scheduled_at_ms) asc, t.priority asc, p.name`,
     [date, TIME_ZONE],
   );
   const pendingRows = await Promise.all(pendingResult.rows.map(async (row: any) => {
@@ -620,7 +667,12 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     runFinishedAt: iso(row.finished_ts_ms),
   }));
 
-  return { accounts, contents, coverage, childTasks };
+  return {
+    accounts,
+    contents,
+    coverage: { ...coverage, contentCount: contents.length },
+    childTasks,
+  };
 }
 
 async function taskDetail(pool: any, id: string): Promise<Json | null> {
@@ -751,6 +803,29 @@ async function listAccountTypes(pool: any): Promise<string[]> {
       order by case when c.name = '总部' then 0 else 1 end, c.name`,
   );
   return result.rows.map((row: any) => row.name);
+}
+
+/**
+ * Active account count per account type × platform. The create dialog uses it
+ * to select every platform that actually has accounts for the chosen type, so
+ * "all platforms" does not queue tasks that would immediately fail empty.
+ * Shape: { [accountType]: { [platformId]: count } }
+ */
+async function listAccountTypePlatformCounts(pool: any): Promise<Json> {
+  const result = await pool.query(
+    `select c.name as type_name, a.platform_id, count(*)::int as account_count
+       from account_category_members m
+       join social_accounts a on a.id = m.account_id and a.active = true
+       join account_categories c on c.id = m.category_id and c.active = true
+       join platforms p on p.id = a.platform_id and p.enabled = true
+      group by c.name, a.platform_id`,
+  );
+  const counts: Json = {};
+  for (const row of result.rows) {
+    const byPlatform = counts[row.type_name] || (counts[row.type_name] = {});
+    byPlatform[row.platform_id] = Number(row.account_count);
+  }
+  return counts;
 }
 
 async function importAccounts(pool: any, body: Json): Promise<Json> {
@@ -1102,11 +1177,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       return json(200, { platforms: await listPlatforms(handle.pool) });
     }
     if (method === "GET" && path === "/api/account-types") {
-      return json(200, { accountTypes: await listAccountTypes(handle.pool) });
+      const [accountTypes, platformCounts] = await Promise.all([
+        listAccountTypes(handle.pool),
+        listAccountTypePlatformCounts(handle.pool),
+      ]);
+      return json(200, { accountTypes, platformCounts });
     }
     if (method === "POST" && path === "/api/tasks") {
       const body = await readJson(request);
-      return json(201, { task: await createTask(handle.pool, body) });
+      const tasks = await createTasks(handle.pool, body);
+      return json(201, { task: tasks[0], tasks });
     }
     if (method === "POST" && path === "/api/accounts") {
       const body = await readJson(request);
