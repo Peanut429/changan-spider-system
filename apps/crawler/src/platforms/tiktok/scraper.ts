@@ -1,6 +1,16 @@
 import { dateRangePosition, nowInDisplayTimeZone } from "../../core/time.ts";
 import { classifyTikTokPageState, shouldRestartTikTokAccountScrape } from "../../core/tiktok-page-state.ts";
 import { truncateText } from "../../core/strings.ts";
+import { ensurePlatform } from "../../db/repositories/runs.ts";
+import { saveTikTokIdentity } from "../../db/repositories/accounts.ts";
+import { FatalPlatformError } from "../errors.ts";
+import {
+  createTikTokApiClient,
+  fetchTikTokPostsPage,
+  normalizeTikTokItem,
+  resolveTikTokIdentity,
+} from "./api.ts";
+import type { TikTokApiClient } from "./api.ts";
 import type { AccountContext, AccountScrapeResult, PlatformScraper } from "../types.ts";
 
 class TikTokAccountRestartRequired extends Error {
@@ -776,55 +786,189 @@ async function scrapeDetail(page, item) {
 }
 
 
+async function scrapeTikTokViaBrowser(ctx: AccountContext): Promise<AccountScrapeResult> {
+  const source = ctx.account;
+  const args: TikTokArgs = {
+    sinceTime: ctx.sinceTsMs,
+    untilTime: ctx.untilTsMs,
+    rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
+    limit: ctx.limit,
+    waitTimeoutMs: 45000,
+    requireLogin: false,
+    humanVerificationReloads: 5,
+    humanVerificationReloadDelayMs: 2500,
+    stableRoundsToStop: 8,
+  };
+
+  const maxAttempts = Math.max(1, tikTokChallengeOptions(args).reloads + 1);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const rawState: { contents: any[] } = { contents: [] };
+    const collector = createTikTokItemListCollector(ctx.page, source);
+    try {
+      console.log(`正在抓取账号：${source.account} ${source.link}（第 ${attempt}/${maxAttempts} 次）`);
+      const gotoState = await gotoTikTokPage(ctx.page, source.link, args, `账号 ${source.account}`);
+      if (shouldRestartTikTokAccountScrape(gotoState)) {
+        throw new TikTokAccountRestartRequired(`TikTok 账号 ${source.account} 点击页面 Refresh 后需要重新抓取账号。`);
+      }
+      await dismissTikTokLoginPopups(ctx.page);
+      const domProfile = await collectProfile(ctx.page, source);
+      const list = await collectPostItemsFromApi(ctx.page, source, args, rawState, collector);
+      const profile = mergeTikTokProfile(source, domProfile, collector.profile());
+      console.log(`账号 ${source.account} 周期内通过 item_list 发现 ${list.length} 条`);
+      return {
+        accountRow: { ...profile, error: "" },
+        contentRows: list,
+      };
+    } catch (error) {
+      if (error instanceof TikTokAccountRestartRequired && attempt < maxAttempts) {
+        console.log(`${error.message} 重新开始 ${attempt}/${maxAttempts - 1}。`);
+        continue;
+      }
+      throw error;
+    } finally {
+      collector.dispose();
+    }
+  }
+
+  throw new Error("TikTok 账号重试次数耗尽");
+}
+
+function apiProfileFromAuthor(source, author, secUid, userId) {
+  const handle = normalizeHandle(author?.uniqueId || source.account);
+  return {
+    account: source.account,
+    displayName: author?.nickname || source.account,
+    profileUrl: handle ? `https://www.tiktok.com/@${handle}` : source.link,
+    followersText: statText(author?.followerCount),
+    followingText: statText(author?.followingCount),
+    postsText: statText(author?.awemeCount),
+    pageTitle: author?.nickname || source.account,
+    rawHeaderText: author?.signature || "",
+    bodyTokenSample: "",
+    userId: userId || "",
+    secUid,
+    signature: author?.signature || "",
+    verified: author?.verified ?? "",
+    profileDataSource: "tikhub-app-v3",
+  };
+}
+
+/**
+ * TikHub 路径：
+ *   - secUid 只解析一次，写进 social_accounts.metadata_json，下次直接读
+ *   - 作品按 max_cursor 翻页，按 createTime 命中时间窗即停
+ *   - 失败直接抛错，不 fallback 到浏览器（避免两边都跑一遍）
+ */
+async function scrapeTikTokViaApi(ctx: AccountContext, client: TikTokApiClient): Promise<AccountScrapeResult> {
+  const source = ctx.account;
+  const username = normalizeHandle(source.account) || source.account;
+  const cached = source.metadata?.tiktok || {};
+  let secUid = String(cached.secUid || "");
+  let userId = String(cached.userId || source.externalAccountId || "");
+
+  if (!secUid) {
+    const identity = await resolveTikTokIdentity(client, username);
+    secUid = identity.secUid;
+    userId = identity.userId || userId;
+    const platformId = await ensurePlatform(ctx.db, { code: "tiktok", name: "TikTok" });
+    await saveTikTokIdentity(ctx.db, { platformId, handle: source.account, userId, secUid });
+    console.log(`TikTok ${username} 首次解析并写入数据库：user_id=${userId || "-"} sec_user_id=${secUid.slice(0, 16)}…`);
+  } else {
+    console.log(`TikTok ${username} 使用数据库缓存的 sec_user_id。`);
+  }
+
+  const args = {
+    sinceTime: ctx.sinceTsMs,
+    untilTime: ctx.untilTsMs,
+    rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
+    limit: ctx.limit,
+  };
+  const scrapedAt = nowInDisplayTimeZone();
+  const rows = new Map<string, any>();
+  let author: any = null;
+  let cursor: string | number = 0;
+  let pages = 0;
+  let reachedBefore = false;
+
+  while (pages < 80) {
+    const page = await fetchTikTokPostsPage(client, {
+      secUid,
+      uniqueId: username,
+      cursor,
+      count: 15,
+    });
+    pages += 1;
+    if (pages === 1) console.log(`TikTok API 返回字段：${page.topLevelKeys.join(", ") || "(空)"}｜请求 ${page.requestId || "-"}`);
+    console.log(`TikTok ${username} 第 ${pages} 页：${page.items.length} 条，hasMore=${page.hasMore}`);
+
+    if (!page.items.length) break;
+
+    for (const raw of page.items) {
+      const item = normalizeTikTokItem(raw);
+      if (!author && item?.author) author = item.author;
+      const row = tiktokApiItemToRow(item, source.account, scrapedAt);
+      if (!row.id || rows.has(row.id)) continue;
+      rows.set(row.id, row);
+      if (!row.isPinned && dateRangePosition(row.publishTime, args) === "before") reachedBefore = true;
+    }
+
+    if (reachedBefore) {
+      console.log(`TikTok ${username} 已越过起始时间，停止翻页。`);
+      break;
+    }
+    if (args.limit && countInsideRange(rows, args) >= args.limit) break;
+    if (!page.hasMore) break;
+    if (!page.cursor || String(page.cursor) === String(cursor)) break;
+    cursor = page.cursor;
+  }
+
+  const contentRows = [...rows.values()]
+    .filter((row) => dateRangePosition(row.publishTime, args) === "inside")
+    .slice(0, args.limit || undefined);
+  const accountRow = {
+    ...apiProfileFromAuthor(source, author, secUid, userId),
+    error: "",
+    tikhubPages: pages,
+    tikhubFetched: rows.size,
+  };
+  console.log(`TikTok ${username} API 完成：${pages} 页，共 ${rows.size} 条，周期内 ${contentRows.length} 条。`);
+  return { accountRow, contentRows };
+}
+
+function countInsideRange(rows: Map<string, any>, args: Record<string, any>): number {
+  let count = 0;
+  for (const row of rows.values()) {
+    if (dateRangePosition(row.publishTime, args) === "inside") count += 1;
+  }
+  return count;
+}
+
 export function createTikTokScraper(): PlatformScraper {
+  // 默认：有 TIKHUB_API_KEY 就走 API；TIKTOK_SOURCE=browser 可强制回浏览器。
+  const apiPreferred = process.env.TIKTOK_SOURCE === "api"
+    || (process.env.TIKTOK_SOURCE !== "browser" && Boolean(process.env.TIKHUB_API_KEY));
+  let client: TikTokApiClient | null = null;
+
   return {
     code: "tiktok",
     name: "TikTok",
-    async scrapeAccount(ctx: AccountContext): Promise<AccountScrapeResult> {
-      const source = ctx.account;
-      const args: TikTokArgs = {
-        sinceTime: ctx.sinceTsMs,
-        untilTime: ctx.untilTsMs,
-        rangeTimeZone: process.env.SCRAPE_TIMEZONE || "Asia/Shanghai",
-        limit: ctx.limit,
-        waitTimeoutMs: 45000,
-        requireLogin: false,
-        humanVerificationReloads: 5,
-        humanVerificationReloadDelayMs: 2500,
-        stableRoundsToStop: 8,
-      };
+    requiresBrowser: !apiPreferred,
 
-      const maxAttempts = Math.max(1, tikTokChallengeOptions(args).reloads + 1);
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const rawState: { contents: any[] } = { contents: [] };
-        const collector = createTikTokItemListCollector(ctx.page, source);
-        try {
-          console.log(`正在抓取账号：${source.account} ${source.link}（第 ${attempt}/${maxAttempts} 次）`);
-          const gotoState = await gotoTikTokPage(ctx.page, source.link, args, `账号 ${source.account}`);
-          if (shouldRestartTikTokAccountScrape(gotoState)) {
-            throw new TikTokAccountRestartRequired(`TikTok 账号 ${source.account} 点击页面 Refresh 后需要重新抓取账号。`);
-          }
-          await dismissTikTokLoginPopups(ctx.page);
-          const domProfile = await collectProfile(ctx.page, source);
-          const list = await collectPostItemsFromApi(ctx.page, source, args, rawState, collector);
-          const profile = mergeTikTokProfile(source, domProfile, collector.profile());
-          console.log(`账号 ${source.account} 周期内通过 item_list 发现 ${list.length} 条`);
-          return {
-            accountRow: { ...profile, error: "" },
-            contentRows: list,
-          };
-        } catch (error) {
-          if (error instanceof TikTokAccountRestartRequired && attempt < maxAttempts) {
-            console.log(`${error.message} 重新开始 ${attempt}/${maxAttempts - 1}。`);
-            continue;
-          }
-          throw error;
-        } finally {
-          collector.dispose();
-        }
+    async prepare() {
+      if (!apiPreferred) return;
+      client = await createTikTokApiClient(process.cwd());
+      if (!client.enabled) {
+        throw new FatalPlatformError("TikTok API 未启用：缺少 TIKHUB_API_KEY");
       }
+      console.log("已启用 TikTok 数据源：TikHub App V3（不需要浏览器）");
+    },
 
-      throw new Error("TikTok 账号重试次数耗尽");
+    async scrapeAccount(ctx: AccountContext): Promise<AccountScrapeResult> {
+      if (apiPreferred) {
+        if (!client) throw new Error("TikTok API client 未初始化");
+        return scrapeTikTokViaApi(ctx, client);
+      }
+      return scrapeTikTokViaBrowser(ctx);
     },
   };
 }

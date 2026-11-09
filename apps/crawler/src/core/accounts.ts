@@ -5,6 +5,10 @@ import { platforms, socialAccounts } from "../db/schema.ts";
 export type SourceAccount = {
   account: string;
   link: string;
+  /** 平台侧的真实 ID（TikTok 的 user_id 等），有就带上，省一次解析请求。 */
+  externalAccountId?: string;
+  /** social_accounts.metadata_json，平台可以往里存少量缓存（如 TikTok 的 secUid）。 */
+  metadata?: Record<string, any>;
 };
 
 export async function loadPlatformAccounts({
@@ -41,6 +45,8 @@ export async function loadPlatformAccounts({
       id: socialAccounts.id,
       account: socialAccounts.handle,
       link: socialAccounts.profileUrl,
+      externalAccountId: socialAccounts.externalAccountId,
+      metadataJson: socialAccounts.metadataJson,
     })
     .from(socialAccounts)
     .innerJoin(platforms, eq(platforms.id, socialAccounts.platformId))
@@ -55,7 +61,12 @@ export async function loadPlatformAccounts({
   const neededIds = accountIds?.length ? new Set(accountIds) : null;
   const filtered = rows
     .filter((row) => !neededIds || neededIds.has(row.id))
-    .map((row) => ({ account: row.account, link: row.link }))
+    .map((row) => ({
+      account: row.account,
+      link: row.link,
+      externalAccountId: row.externalAccountId || "",
+      metadata: (row.metadataJson || {}) as Record<string, any>,
+    }))
     .filter((row) => row.account && row.link)
     .filter((row) => !account || row.account === account);
 
