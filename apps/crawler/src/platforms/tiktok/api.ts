@@ -13,6 +13,7 @@ import { parseEnv } from "node:util";
 const TIKHUB_BASE = "https://api.tikhub.io";
 const RESOLVE_URL = `${TIKHUB_BASE}/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username`;
 const POSTS_URL = `${TIKHUB_BASE}/api/v1/tiktok/app/v3/fetch_user_post_videos_v2`;
+const PROFILE_URL = `${TIKHUB_BASE}/api/v1/tiktok/app/v3/handler_user_profile`;
 
 const RATE_LIMIT_INTERVAL_MS = 120;
 const RETRY_DELAYS_MS = [800, 2000, 5000];
@@ -45,25 +46,58 @@ export async function createTikTokApiClient(workspace: string): Promise<TikTokAp
 
 /** 用户名 → user_id / sec_user_id。一个账号只该调一次。 */
 export async function resolveTikTokIdentity(client: TikTokApiClient, username: string): Promise<TikTokIdentity> {
+  try {
+    return await resolveByIdEndpoint(client, username);
+  } catch (error: any) {
+    console.log(`TikHub 用户名解析失败，改用 handler_user_profile 兜底（${username}）：${error.message}`);
+    return await resolveByProfileEndpoint(client, username);
+  }
+}
+
+async function resolveByIdEndpoint(client: TikTokApiClient, username: string): Promise<TikTokIdentity> {
   const url = new URL(RESOLVE_URL);
   url.searchParams.set("username", username);
   const json = await tikhubGet(client, url, `解析用户 ${username}`);
   const data = unwrapData(json);
-  const userId = text(data.user_id ?? data.uid ?? data.userId ?? data.user?.uid ?? data.user?.user_id);
-  const secUid = text(
-    data.sec_user_id
-      ?? data.secUid
-      ?? data.sec_uid
-      ?? data.user?.sec_uid
-      ?? data.user?.secUid,
-  );
-  if (!secUid) {
+  const identity = identityFrom(data);
+  if (!identity.secUid) {
     throw new Error(
-      `TikHub 没有返回 sec_user_id（${username}），返回字段：${Object.keys(data).join(", ") || "(空)"}`
-      + `｜片段：${JSON.stringify(data).slice(0, ERROR_BODY_LIMIT)}`,
+      `TikHub 没有返回 sec_user_id（${username}）：code=${json?.code ?? "-"} ${json?.message || json?.message_zh || ""}`
+      + `｜data 字段：${Object.keys(data).join(", ") || "(空)"}`
+      + `｜响应片段：${JSON.stringify(json).slice(0, ERROR_BODY_LIMIT)}`,
     );
   }
-  return { userId, secUid };
+  return identity;
+}
+
+async function resolveByProfileEndpoint(client: TikTokApiClient, username: string): Promise<TikTokIdentity> {
+  const url = new URL(PROFILE_URL);
+  url.searchParams.set("unique_id", username);
+  const json = await tikhubGet(client, url, `用户资料 ${username}`);
+  const data = unwrapData(json);
+  const identity = identityFrom(data.user || data);
+  if (!identity.secUid) {
+    throw new Error(
+      `TikHub 用户资料也没有返回 sec_uid（${username}）：code=${json?.code ?? "-"} ${json?.message || json?.message_zh || ""}`
+      + `｜data 字段：${Object.keys(data).join(", ") || "(空)"}`
+      + `｜响应片段：${JSON.stringify(json).slice(0, ERROR_BODY_LIMIT)}`,
+    );
+  }
+  return identity;
+}
+
+function identityFrom(data: any): TikTokIdentity {
+  const user = data?.user || data || {};
+  return {
+    userId: text(user.uid ?? user.user_id ?? user.userId ?? data?.user_id ?? data?.uid),
+    secUid: text(
+      user.sec_uid
+        ?? user.secUid
+        ?? data?.sec_user_id
+        ?? data?.secUid
+        ?? data?.sec_uid,
+    ),
+  };
 }
 
 /** 作品列表单页。cursor 传 0 开始，返回值给下一页。 */
@@ -188,6 +222,8 @@ function unwrapData(json: any): any {
       break;
     }
   }
+  // 有的接口 data 是数组（["命中项"]），取第一条
+  if (Array.isArray(data)) return data[0] ?? {};
   if (data == null) return {};
   return typeof data === "object" ? data : {};
 }

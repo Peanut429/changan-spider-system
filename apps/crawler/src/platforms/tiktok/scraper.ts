@@ -833,6 +833,23 @@ async function scrapeTikTokViaBrowser(ctx: AccountContext): Promise<AccountScrap
   throw new Error("TikTok 账号重试次数耗尽");
 }
 
+/**
+ * 账号表里的 handle 可能是显示名（带空格，比如 "BYD Global"），
+ * 优先从主页链接里取 @handle，取不到才退回 handle。
+ */
+function tiktokUsernameFor(source: { account: string; link: string }): string {
+  const link = String(source.link || "");
+  const match = /tiktok\.com\/@([^/?#]+)/i.exec(link);
+  if (match) {
+    try {
+      return decodeURIComponent(match[1]).trim();
+    } catch {
+      return match[1].trim();
+    }
+  }
+  return String(source.account || "").trim().replace(/^@/, "");
+}
+
 function apiProfileFromAuthor(source, author, secUid, userId) {
   const handle = normalizeHandle(author?.uniqueId || source.account);
   return {
@@ -861,7 +878,14 @@ function apiProfileFromAuthor(source, author, secUid, userId) {
  */
 async function scrapeTikTokViaApi(ctx: AccountContext, client: TikTokApiClient): Promise<AccountScrapeResult> {
   const source = ctx.account;
-  const username = normalizeHandle(source.account) || source.account;
+  const username = tiktokUsernameFor(source);
+  if (!username || /\s/.test(username)) {
+    throw new Error(
+      `账号 ${source.account} 的标识 "${username}" 不是 TikTok 用户名（含空格）。`
+      + `请把账号改成 @handle，或补上 https://www.tiktok.com/@handle 主页链接。`,
+    );
+  }
+  console.log(`TikTok 解析用户名：${username}`);
   const cached = source.metadata?.tiktok || {};
   let secUid = String(cached.secUid || "");
   let userId = String(cached.userId || source.externalAccountId || "");
