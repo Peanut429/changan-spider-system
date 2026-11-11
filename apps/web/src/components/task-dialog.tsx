@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, LoaderCircle, Pencil, Plus } from 'lucide-react'
+import { AlertTriangle, Check, LoaderCircle, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { subDays } from 'date-fns'
 
 import { createTasks, updateTask } from '@/lib/api'
 import type { Platform, Task } from '@/lib/types'
-import { dateFromKey, dateKeyFromDate, timeKeyFromDate, todayKey } from '@/lib/format'
+import { dateFromKey, dateKeyFromDate, timeKeyFromDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,13 +21,19 @@ import { Label } from '@/components/ui/label'
 import { PlatformMark } from '@/components/platform-mark'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
+/** "2026-11-09" → "11月9日"；直接切字符串，免得以浏览器时区换算把日期算偏一天。 */
+function shortDayLabel(dayKey: string): string {
+  const [, month, day] = dayKey.split('-')
+  return `${Number(month)}月${Number(day)}日`
+}
+
 export function TaskDialog({
   open,
   onOpenChange,
   platforms,
   accountTypes,
   platformCounts,
-  defaultDate,
+  today,
   task,
   onSaved,
 }: {
@@ -37,25 +43,29 @@ export function TaskDialog({
   accountTypes: string[]
   /** 账号类型 → 平台 ID → 启用账号数；用于默认选中该类型下有账号的平台 */
   platformCounts: Record<string, Record<string, number>>
-  defaultDate: string
+  /**
+   * 今天（YYYY-MM-DD，业务时区）。只作为新建任务的默认日期，
+   * 不跟随任务列表当前查看的日期——否则会照搬到缓存里的旧日期上。
+   */
+  today: string
   /** null / undefined means create a new task. */
   task?: Task | null
   onSaved: (tasks: Task[]) => void
 }) {
   const [platformIds, setPlatformIds] = useState<string[]>([])
   const [accountType, setAccountType] = useState('')
-  const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [scheduledDate, setScheduledDate] = useState(today)
   const [scheduledTime, setScheduledTime] = useState('09:00')
   const [windowStart, setWindowStart] = useState('')
-  const [windowEnd, setWindowEnd] = useState(defaultDate)
+  const [windowEnd, setWindowEnd] = useState(today)
   const [limit, setLimit] = useState('0')
   const [saving, setSaving] = useState(false)
 
   const defaults = useMemo(() => {
-    const end = defaultDate || todayKey()
+    const end = today
     const start = dateKeyFromDate(subDays(dateFromKey(end), 14))
     return { start, end }
-  }, [defaultDate])
+  }, [today])
 
   /**
    * Platforms that have at least one active account for the type. A task for a
@@ -84,7 +94,7 @@ export function TaskDialog({
         setScheduledDate(dateKeyFromDate(scheduled))
         setScheduledTime(timeKeyFromDate(scheduled))
       } else {
-        setScheduledDate(defaultDate || todayKey())
+        setScheduledDate(today)
         setScheduledTime('09:00')
       }
 
@@ -108,12 +118,12 @@ export function TaskDialog({
     setAccountType(initialType)
     // Default is the whole account type: every platform that has accounts.
     setPlatformIds(supportedPlatformIds(initialType))
-    setScheduledDate(defaultDate || todayKey())
+    setScheduledDate(today)
     setScheduledTime('09:00')
     setWindowStart(defaults.start)
     setWindowEnd(defaults.end)
     setLimit('0')
-  }, [open, task, accountTypes, defaultDate, defaults, supportedPlatformIds])
+  }, [open, task, accountTypes, today, defaults, supportedPlatformIds])
 
   const platformId = platformIds[0] || ''
   const selectedCount = platformIds.length
@@ -155,6 +165,9 @@ export function TaskDialog({
     return Number.isFinite(ms) ? ms : NaN
   }, [scheduledDate, scheduledTime])
   const scheduledInPast = Number.isFinite(scheduledAtMs) && scheduledAtMs <= Date.now()
+  // 页面上带着 ?date= 的旧链接时，人很容易顺手把任务排到那天去；
+  // 只要选中的不是今天，就在日期下面把这件事说明白。
+  const offToday = Boolean(scheduledDate) && scheduledDate !== today
 
   const pastWarning = task
     ? task.status === 'paused'
@@ -334,7 +347,27 @@ export function TaskDialog({
             {task?.status === 'paused' ? (
               <p className="text-[11px] text-muted-foreground">任务当前已暂停，保存后仍保持暂停，不会自动执行。</p>
             ) : null}
-            {scheduledInPast ? <p className="text-[11px] text-amber-600">{pastWarning}</p> : null}
+            {offToday ? (
+              <div role="status" className="cx-inline-warn">
+                <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  {'计划执行日期是 '}
+                  <strong className="font-semibold">{shortDayLabel(scheduledDate)}</strong>
+                  {`，不是今天（${shortDayLabel(today)}）。`}
+                  {task ? '保存后任务会排到这一天。' : '确认要排到这一天再创建。'}
+                  <button
+                    type="button"
+                    className="ml-1 font-medium underline underline-offset-2 hover:no-underline"
+                    onClick={() => setScheduledDate(today)}
+                  >
+                    改成今天
+                  </button>
+                </span>
+              </div>
+            ) : null}
+            {scheduledInPast ? (
+              <p className="text-[11px] text-[color:var(--cx-warn)]">{pastWarning}</p>
+            ) : null}
           </div>
 
           <div className="grid gap-2">

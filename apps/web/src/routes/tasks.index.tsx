@@ -1,14 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, History, ListTodo, LoaderCircle, Pause, Pencil, Play, Plus, RefreshCw, Trash2, UsersRound } from 'lucide-react'
+import { CalendarClock, CalendarDays, CircleX, History, ListTodo, LoaderCircle, Pause, Pencil, Play, Plus, RefreshCw, Trash2, UsersRound } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
-import { deleteTask, getAccountTypes, getPlatforms, getTasks, pauseTask, resumeTask } from '@/lib/api'
-import type { Task } from '@/lib/types'
+import { cancelTask, deleteTask, getAccountTypes, getPlatforms, getTasks, pauseTask, resumeTask } from '@/lib/api'
+import type { Task, TaskRerun } from '@/lib/types'
 import { dateFromKey, dateKeyFromDate, formatClock, formatDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import StarBorder from '@/components/StarBorder/StarBorder'
 import { AnimatedNumber } from '@/components/console/animated-number'
@@ -17,6 +17,7 @@ import { ConsolePage } from '@/components/console/console-page'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
 import { ChangeBadge } from '@/components/day-compare'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
+import { CancelTaskDialog } from '@/components/cancel-task-dialog'
 import { PlatformMark } from '@/components/platform-mark'
 import { TaskDialog } from '@/components/task-dialog'
 import {
@@ -167,7 +168,28 @@ function durationText(task: Task): string {
 }
 
 /** Run state, not outcome: is this batch still going, or is it done? */
-function runState(task: Task): { label: string; tone: 'running' | 'ok' | 'fail' | 'idle'; detail: string } {
+type RunTone = 'running' | 'ok' | 'fail' | 'idle' | 'queue'
+type RunStateValue = { label: string; tone: RunTone; detail: string }
+
+function runState(task: Task): RunStateValue {
+  // A rerun is a child task, so the parent's own run is already finished. The
+  // queue is the current activity, and saying "已结束" here is what made the
+  // operator unsure whether the rerun click had landed.
+  const rerun = task.activeRerun
+  if (rerun) {
+    if (rerun.status === 'running') {
+      const done = rerun.successAccounts + rerun.failedAccounts
+      return {
+        label: '补跑执行中',
+        tone: 'running',
+        detail: done > 0 ? `${done}/${rerun.accountCount} 已完成` : `${rerun.accountCount} 个账号`,
+      }
+    }
+    if (rerun.status === 'paused') {
+      return { label: '补跑已暂停', tone: 'idle', detail: `${rerun.accountCount} 个账号 · 不会自动执行` }
+    }
+    return { label: '补跑排队', tone: 'queue', detail: `${rerun.accountCount} 个账号 · 等待执行` }
+  }
   if (task.status === 'running') {
     return { label: '运行中', tone: 'running', detail: task.runStartedAt ? `开始 ${runMoment(task, task.runStartedAt)}` : '已开始' }
   }
@@ -187,13 +209,165 @@ function runState(task: Task): { label: string; tone: 'running' | 'ok' | 'fail' 
   }
 }
 
-function RunCell({ task }: { task: Task }) {
-  const state = runState(task)
+function StateCell({ state }: { state: RunStateValue }) {
   return (
     <span className="cx-run" data-tone={state.tone}>
       <span className="cx-run-label">{state.label}</span>
       <span className="cx-run-detail">{state.detail}</span>
     </span>
+  )
+}
+
+function RunCell({ task }: { task: Task }) {
+  return <StateCell state={runState(task)} />
+}
+
+function rerunKindLabel(kind: string): string {
+  return kind === 'retry_failed' ? '失败重试' : kind === 'backfill_new' ? '补充新增' : '手动重跑'
+}
+
+const RERUN_STATUS_RANK: Record<string, number> = { running: 0, pending: 1, paused: 2 }
+
+function rerunState(rerun: TaskRerun): RunStateValue {
+  if (rerun.status === 'running') {
+    const done = rerun.successAccounts + rerun.failedAccounts
+    return {
+      label: '执行中',
+      tone: 'running',
+      detail: done > 0 ? `${done}/${rerun.accountCount} 已完成` : `${rerun.accountCount} 个账号`,
+    }
+  }
+  if (rerun.status === 'paused') {
+    return { label: '已暂停', tone: 'idle', detail: `${rerun.accountCount} 个账号 · 不会自动执行` }
+  }
+  return { label: '待执行', tone: 'queue', detail: `${rerun.accountCount} 个账号 · 等待 worker` }
+}
+
+function rerunMoment(rerun: TaskRerun): string {
+  if (rerun.status === 'running') {
+    return rerun.runStartedAt ? `开始 ${formatDateTime(rerun.runStartedAt)}` : '已开始'
+  }
+  if (rerun.status === 'paused') return '已暂停'
+  return '立即执行'
+}
+
+function RerunQueueTable({
+  reruns,
+  actingId,
+  onPause,
+  onResume,
+  onCancel,
+}: {
+  reruns: TaskRerun[]
+  actingId: string | null
+  onPause: (task: { id: string }) => void
+  onResume: (task: { id: string }) => void
+  onCancel: (rerun: TaskRerun) => void
+}) {
+  const reduceMotion = useReducedMotion()
+  const sorted = useMemo(
+    () => [...reruns].sort((a, b) => {
+      const rank = (RERUN_STATUS_RANK[a.status] ?? 9) - (RERUN_STATUS_RANK[b.status] ?? 9)
+      return rank !== 0 ? rank : a.priority - b.priority
+    }),
+    [reruns],
+  )
+  return (
+    <table className="cx-table">
+      <thead>
+        <tr>
+          <th>平台</th>
+          <th>账号类型</th>
+          <th>任务</th>
+          <th className="cx-run-head">状态</th>
+          <th>时间</th>
+          <th>主任务</th>
+          <th className="cx-right">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((rerun, index) => {
+          const busy = actingId === rerun.id
+          const active = rerun.status === 'pending' || rerun.status === 'paused'
+          return (
+            <motion.tr
+              key={rerun.id}
+              className="cx-row"
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ ...ROW_IN, delay: Math.min(index * ROW_STAGGER, 0.2) }}
+            >
+              <td data-block="true"><PlatformMark code={rerun.platformCode} name={rerun.platformName} /></td>
+              <td data-label="账号类型">{rerun.accountType || '—'}</td>
+              <td data-label="任务">
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <span className="cx-tag">{rerunKindLabel(rerun.kind)}</span>
+                  <span className="text-[11.5px] tabular-nums text-muted-foreground">{rerun.accountCount} 个账号</span>
+                </span>
+              </td>
+              <td data-label="状态"><StateCell state={rerunState(rerun)} /></td>
+              <td data-label="时间">
+                <span className="cx-window" title={rerun.createdAt ? `加入队列 ${formatDateTime(rerun.createdAt)}` : undefined}>
+                  {rerunMoment(rerun)}
+                </span>
+              </td>
+              <td data-label="主任务">
+                {rerun.parentTaskId ? (
+                  <Link
+                    className="cx-link"
+                    to="/tasks/$taskId"
+                    params={{ taskId: rerun.parentTaskId }}
+                    search={{ date: rerun.parentScheduledAt ? dateKeyFromDate(new Date(rerun.parentScheduledAt)) : todayKey() }}
+                    title={rerun.parentScheduledAt ? `主任务计划执行 ${formatDateTime(rerun.parentScheduledAt)}` : '查看主任务'}
+                  >
+                    查看主任务
+                  </Link>
+                ) : '—'}
+              </td>
+              <td data-label="操作" className="cx-right">
+                <div className="cx-row-actions">
+                  {rerun.status === 'pending' ? (
+                    <button
+                      type="button"
+                      className="cx-link disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => onPause(rerun)}
+                    >
+                      {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Pause className="size-3.5" />}
+                      暂停
+                    </button>
+                  ) : null}
+                  {rerun.status === 'paused' ? (
+                    <button
+                      type="button"
+                      className="cx-link disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => onResume(rerun)}
+                    >
+                      {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                      继续
+                    </button>
+                  ) : null}
+                  {active ? (
+                    <button
+                      type="button"
+                      className="cx-link cx-rerun-cancel disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => onCancel(rerun)}
+                    >
+                      <CircleX className="size-3.5" />
+                      取消
+                    </button>
+                  ) : (
+                    <span className="cx-hint">执行中不可操作</span>
+                  )}
+                </div>
+              </td>
+            </motion.tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }
 
@@ -217,18 +391,26 @@ function Coverage({
   failed,
   running,
   pending,
+  queued,
 }: {
   success: number
   total: number
   failed: number
   running: number
   pending: number
+  queued: number
 }) {
   const denominator = Math.max(total, 1)
   const okWidth = Math.min(100, (success / denominator) * 100)
   const failWidth = Math.min(100 - okWidth, (failed / denominator) * 100)
   const runWidth = Math.min(100 - okWidth - failWidth, (running / denominator) * 100)
   const pendingWidth = Math.min(100 - okWidth - failWidth - runWidth, (pending / denominator) * 100)
+  const notes = [
+    ...(failed > 0 ? [{ tone: 'fail', label: `失败 ${failed}` }] : []),
+    ...(running > 0 ? [{ tone: 'run', label: `运行中 ${running}` }] : []),
+    ...(pending > 0 ? [{ tone: 'wait', label: `待补 ${pending}` }] : []),
+    ...(queued > 0 ? [{ tone: 'queue', label: `其中排队 ${queued}` }] : []),
+  ]
 
   return (
     <span className="cx-cover">
@@ -242,17 +424,18 @@ function Coverage({
         {runWidth > 0 ? <i data-state="run" style={{ width: `${runWidth}%` }} /> : null}
         {pendingWidth > 0 ? <i data-state="wait" style={{ width: `${pendingWidth}%` }} /> : null}
       </span>
-      {failed > 0 || running > 0 || pending > 0 ? (
+      {notes.length > 0 ? (
         <span className="cx-cover-note">
-          {failed > 0 ? <span data-tone="fail">失败 {failed}</span> : null}
-          {failed > 0 && (running > 0 || pending > 0) ? ' · ' : null}
-          {running > 0 ? <span data-tone="run">运行中 {running}</span> : null}
-          {running > 0 && pending > 0 ? ' · ' : null}
-          {pending > 0 ? <span data-tone="wait">待补 {pending}</span> : null}
+          {notes.map((note, index) => (
+            <Fragment key={note.tone}>
+              {index > 0 ? ' · ' : null}
+              <span data-tone={note.tone}>{note.label}</span>
+            </Fragment>
+          ))}
         </span>
       ) : null}
       <span className="sr-only">
-        成功 {success} 个，失败 {failed} 个，运行中 {running} 个，待补 {pending} 个，共 {total} 个账号
+        成功 {success} 个，失败 {failed} 个，运行中 {running} 个，待补 {pending} 个，补跑排队 {queued} 个，共 {total} 个账号
       </span>
     </span>
   )
@@ -569,6 +752,7 @@ function ExecutedTable({
                     failed={task.failedAccounts}
                     running={runningOf(task)}
                     pending={task.newAccounts}
+                    queued={task.queuedAccounts}
                   />
                 </td>
                 <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
@@ -612,12 +796,30 @@ function TasksPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actingId, setActingId] = useState<string | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<TaskRerun | null>(null)
   const [sweep, setSweep] = useState(1)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const query = useQuery({ queryKey: ['tasks', date], queryFn: () => getTasks(date) })
+  const query = useQuery({
+    queryKey: ['tasks', date],
+    queryFn: () => getTasks(date),
+    // A queued rerun can start while the operator is looking at the page. Poll
+    // only while there is live work, so an idle list stays quiet.
+    refetchInterval: (current) => {
+      const data = current.state.data
+      if (!data) return false
+      const live = data.reruns.some((rerun) => rerun.status !== 'paused')
+        || data.executed.some((task) => task.status === 'running' || task.activeRerun?.status === 'running' || task.activeRerun?.status === 'pending')
+        || data.pending.some((task) => task.status === 'running')
+      return live ? 8000 : false
+    },
+  })
   const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: getPlatforms })
   const accountTypesQuery = useQuery({ queryKey: ['account-types'], queryFn: getAccountTypes })
   const selectedDate = useMemo(() => dateFromKey(date), [date])
+  // The list can sit on a cached ?date= from an old link; the create dialog
+  // must not inherit it, so today is computed here and passed down explicitly.
+  const today = todayKey()
+  const viewingToday = date === today
   const reduceMotion = useReducedMotion()
   const [groupBy, setGroupBy] = useState<GroupBy>(readStoredGroup)
 
@@ -659,7 +861,7 @@ function TasksPage() {
     }
   }
 
-  const handlePause = async (task: Task) => {
+  const handlePause = async (task: { id: string }) => {
     setActingId(task.id)
     try {
       await pauseTask(task.id)
@@ -674,13 +876,27 @@ function TasksPage() {
     }
   }
 
-  const handleResume = async (task: Task) => {
+  const handleResume = async (task: { id: string }) => {
     setActingId(task.id)
     try {
       const result = await resumeTask(task.id)
       toast.success(result.immediate ? '已继续，计划时间已过，将立即执行' : '已继续，将按计划时间执行')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '继续任务失败')
+    } finally {
+      setActingId(null)
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    }
+  }
+
+  const handleCancelRerun = async (id: string) => {
+    setActingId(id)
+    try {
+      await cancelTask(id)
+      toast.success('已取消补跑任务，账号不会重新执行')
+      setCancelTarget(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '取消补跑任务失败')
     } finally {
       setActingId(null)
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -742,6 +958,18 @@ function TasksPage() {
             <Calendar mode="single" selected={selectedDate} onSelect={changeDate} locale={zhCN} />
           </PopoverContent>
         </Popover>
+        {viewingToday ? null : (
+          <button
+            type="button"
+            className="cx-not-today"
+            title={`当前查看的是 ${dateLabel}，不是今天；创建任务默认排到今天`}
+            onClick={() => changeDate(dateFromKey(today))}
+          >
+            <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden sm:inline">不是今天 · 回到今天</span>
+            <span className="sm:hidden">回到今天</span>
+          </button>
+        )}
         <div className="cx-groupby">
           <span className="cx-groupby-label">分组</span>
           <div className="cx-chips">
@@ -798,6 +1026,32 @@ function TasksPage() {
 
       {query.data ? (
         <>
+          {query.data.reruns.length > 0 ? (
+            <section className="cx-section">
+              <div className="cx-section-head">
+                <h2 className="cx-h2">补跑队列</h2>
+                <span className="cx-count">
+                  {query.data.reruns.length} 个补跑任务 · 全部日期 · 账号范围继承自原任务，不可编辑，可暂停或取消
+                </span>
+              </div>
+              <motion.div
+                key="rerun-queue"
+                className="cx-surface"
+                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={ROW_IN}
+              >
+                <RerunQueueTable
+                  reruns={query.data.reruns}
+                  actingId={actingId}
+                  onPause={handlePause}
+                  onResume={handleResume}
+                  onCancel={setCancelTarget}
+                />
+              </motion.div>
+            </section>
+          ) : null}
+
           <section className="cx-section">
             <div className="cx-section-head">
               <h2 className="cx-h2">待执行</h2>
@@ -886,8 +1140,22 @@ function TasksPage() {
         platforms={platformsQuery.data?.platforms ?? []}
         accountTypes={accountTypesQuery.data?.accountTypes ?? []}
         platformCounts={accountTypesQuery.data?.platformCounts ?? NO_PLATFORM_COUNTS}
-        defaultDate={date}
+        today={today}
         onSaved={handleSaved}
+      />
+
+      <CancelTaskDialog
+        target={cancelTarget
+          ? {
+              id: cancelTarget.id,
+              accountCount: cancelTarget.accountCount,
+              title: `取消这次${rerunKindLabel(cancelTarget.kind)}？`,
+              description: `将取消 ${cancelTarget.accountCount} 个账号的补跑。这些账号不会重新执行，原任务已经抓到的数据不受影响。`,
+            }
+          : null}
+        busy={Boolean(cancelTarget && actingId === cancelTarget.id)}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={handleCancelRerun}
       />
     </ConsolePage>
   )

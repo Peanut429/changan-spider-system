@@ -155,6 +155,13 @@ export function pauseTask(id: string) {
   )
 }
 
+export function cancelTask(id: string) {
+  return request<{ ok: boolean; id: string; status: string; already?: boolean }>(
+    `/api/tasks/${encodeURIComponent(id)}/cancel`,
+    { method: 'POST' },
+  )
+}
+
 export function resumeTask(id: string) {
   return request<{ ok: boolean; id: string; status: string; immediate?: boolean; already?: boolean }>(
     `/api/tasks/${encodeURIComponent(id)}/resume`,

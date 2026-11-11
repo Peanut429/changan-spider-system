@@ -688,6 +688,180 @@
   background: var(--cx-danger);
 }
 
+/* A queued rerun is work that has not started yet: amber, no pulse. */
+.cx-run[data-tone='queue'] .cx-run-label {
+  color: var(--cx-warn);
+}
+
+.cx-run[data-tone='queue'] .cx-run-label::before {
+  background: var(--cx-warn);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--cx-warn) 45%, transparent);
+}
+
+.cx-cover-note [data-tone='queue'] {
+  color: var(--cx-warn);
+}
+
+/* ---------- rerun queue ---------- */
+
+.cx-rerun {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--cx-warn) 32%, var(--cx-line));
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--cx-warn) 8%, transparent), transparent 72%),
+    var(--cx-panel);
+}
+
+.cx-rerun[data-state='paused'] {
+  border-color: var(--cx-line-strong);
+  background: var(--cx-panel-2);
+}
+
+.cx-rerun[data-state='running'] {
+  border-color: color-mix(in oklab, var(--cx-run) 38%, var(--cx-line));
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--cx-run) 9%, transparent), transparent 72%),
+    var(--cx-panel);
+}
+
+.cx-rerun-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--cx-warn);
+  background: color-mix(in oklab, var(--cx-warn) 14%, transparent);
+}
+
+.cx-rerun[data-state='paused'] .cx-rerun-icon {
+  color: var(--cx-ink-3);
+  background: var(--cx-panel-2);
+}
+
+.cx-rerun[data-state='running'] .cx-rerun-icon {
+  color: var(--cx-run);
+  background: color-mix(in oklab, var(--cx-run) 14%, transparent);
+}
+
+.cx-rerun-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cx-rerun-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cx-ink);
+}
+
+.cx-rerun-title em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--cx-ink-3);
+}
+
+.cx-rerun-detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--cx-ink-3);
+}
+
+.cx-rerun-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.cx-rerun-live {
+  font-size: 11.5px;
+  color: var(--cx-run);
+  white-space: nowrap;
+}
+
+.cx .cx-rerun-cancel {
+  color: var(--cx-danger);
+}
+
+.cx .cx-rerun-cancel:hover {
+  color: var(--cx-danger);
+  background: color-mix(in oklab, var(--cx-danger) 10%, transparent);
+}
+
+.cx-rerun-badge {
+  color: var(--cx-warn);
+  border-color: color-mix(in oklab, var(--cx-warn) 38%, transparent);
+  background: color-mix(in oklab, var(--cx-warn) 8%, transparent);
+}
+
+.cx-rerun-badge[data-state='running'] {
+  color: var(--cx-run);
+  border-color: color-mix(in oklab, var(--cx-run) 38%, transparent);
+  background: color-mix(in oklab, var(--cx-run) 8%, transparent);
+}
+
+.cx-rerun-badge[data-state='paused'] {
+  color: var(--cx-ink-3);
+  border-color: var(--cx-line-strong);
+  background: transparent;
+}
+
+/* Per-account queue overlay in the detail table. */
+.cx-queue-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--cx-warn);
+}
+
+.cx-queue-status[data-state='paused'] {
+  color: var(--cx-ink-3);
+}
+
+.cx-queue-status[data-state='running'] {
+  color: var(--cx-run);
+}
+
+.cx-queue-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.cx-queue-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cx-queue-status[data-state='running'] .cx-queue-status-dot {
+  box-shadow: 0 0 8px currentColor;
+  animation: cx-pulse 1.6s ease-in-out infinite;
+}
+
+.cx-queue-status-note {
+  font-size: 10.5px;
+  color: var(--cx-ink-3);
+  white-space: nowrap;
+}
+
 .cx-running {
   display: inline-flex;
   align-items: center;
@@ -734,6 +908,7 @@
   background: none;
   border: 0;
   cursor: pointer;
+  white-space: nowrap;
   transition: background-color 120ms ease-out, color 120ms ease-out, transform 90ms ease-out;
 }
 
@@ -833,6 +1008,13 @@
   scrollbar-width: none;
 }
 
+/* The segmented control must keep its natural item widths and scroll instead
+   of squeezing labels into each other on phones. */
+.cx-chips > * {
+  flex: 0 0 auto;
+  width: max-content;
+}
+
 .cx-chips::-webkit-scrollbar {
   display: none;
 }
@@ -852,6 +1034,43 @@
   line-height: 1.4;
   color: var(--cx-ink-2);
   white-space: nowrap;
+}
+
+/* The list may be parked on a cached ?date=; this says so and offers the way
+   back. It sits next to the date because that is where the wrong day is read. */
+.cx-not-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in oklab, var(--cx-warn) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--cx-warn) 9%, transparent);
+  color: var(--cx-warn);
+  font-size: 11.5px;
+  line-height: 1.3;
+  white-space: nowrap;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+}
+
+.cx-not-today:hover {
+  border-color: color-mix(in oklab, var(--cx-warn) 58%, transparent);
+  background: color-mix(in oklab, var(--cx-warn) 16%, transparent);
+}
+
+/* Inline warning used inside dialogs and rows: token colour, so it holds up on
+   both the paper and the phosphor screen. */
+.cx-inline-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--cx-warn) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--cx-warn) 10%, transparent);
+  color: var(--cx-warn);
+  font-size: 11.5px;
+  line-height: 1.55;
 }
 
 /* ---------- chips and inline banners ---------- */
@@ -1273,6 +1492,16 @@
 }
 
 @media (max-width: 720px) {
+  .cx-rerun {
+    flex-wrap: wrap;
+  }
+
+  .cx-rerun-actions {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: 40px;
+  }
+
   .cx-surface {
     background: transparent;
     border: 0;

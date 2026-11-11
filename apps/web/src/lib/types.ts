@@ -12,9 +12,47 @@ export type TaskSummary = {
   success: number
   failed: number
   cancelled: number
+  reruns: number
   accountsSuccess: number
   accountsFailed: number
   contentsSuccess: number
+}
+
+/** A child task that is waiting in (or currently running from) the rerun queue. */
+export type TaskRerun = {
+  id: string
+  parentTaskId: string | null
+  platformId: string
+  platformCode: string
+  platformName: string
+  accountType: string | null
+  kind: string
+  accountCount: number
+  status: string
+  priority: number
+  scheduledAt: string | null
+  createdAt: string | null
+  parentScheduledAt: string | null
+  runId: string | null
+  runStatus: string | null
+  runStartedAt: string | null
+  runFinishedAt: string | null
+  successAccounts: number
+  failedAccounts: number
+}
+
+/** Compact copy of the active rerun attached to its parent task. */
+export type ActiveRerun = {
+  id: string
+  status: string
+  kind: string
+  accountCount: number
+  scheduledAt: string | null
+  createdAt: string | null
+  runStartedAt: string | null
+  runFinishedAt: string | null
+  successAccounts: number
+  failedAccounts: number
 }
 
 export type TaskYesterday = {
@@ -35,6 +73,9 @@ export type Task = {
   platformName: string
   accountType: string | null
   params: Record<string, unknown>
+  /** Set only on child tasks created by a rerun. */
+  parentTaskId: string | null
+  taskKind: string | null
   priority: number
   status: 'pending' | 'paused' | 'running' | 'success' | 'failed' | 'cancelled' | string
   scheduledAt: string | null
@@ -50,6 +91,10 @@ export type Task = {
   successAccounts: number
   failedAccounts: number
   newAccounts: number
+  /** Accounts waiting in a queued/running rerun. */
+  queuedAccounts: number
+  /** The rerun that is pending, paused or running for this task. */
+  activeRerun: ActiveRerun | null
   coverageTotal: number
   accountMetricCount: number
   contentMetricCount: number
@@ -65,6 +110,8 @@ export type TaskListResponse = {
   summary: TaskSummary
   pending: Task[]
   executed: Task[]
+  /** Active child tasks across all dates; the queue the operator can act on. */
+  reruns: TaskRerun[]
 }
 
 export type Run = {
@@ -97,6 +144,15 @@ export type AccountYesterday = {
   contentCountInWindow: number | null
 }
 
+export type TaskAccountQueue = {
+  taskId: string
+  status: 'pending' | 'paused' | 'running' | string
+  kind: string
+  scheduledAt: string | null
+  createdAt: string | null
+  accountCount: number
+}
+
 export type TaskAccount = {
   id: string
   accountId: string
@@ -105,6 +161,8 @@ export type TaskAccount = {
   profileUrl: string
   platformCode: string
   status: string
+  /** Overlay: the account is waiting for a queued/paused/running rerun. */
+  queue: TaskAccountQueue | null
   startedAt: string | null
   finishedAt: string | null
   contentFoundCount: number
@@ -157,6 +215,7 @@ export type TaskCoverage = {
   failed: number
   newAccounts: number
   running: number
+  queued: number
   zeroContent: number
   disabled: number
 }
@@ -170,6 +229,8 @@ export type TaskChildRun = {
   failedAccounts: number
   contentMetricCount: number
   status: string
+  scheduledAt: string | null
+  createdAt: string | null
   runId: string | null
   runStatus: string | null
   runStartedAt: string | null

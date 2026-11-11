@@ -97,6 +97,8 @@ function taskRow(row: any): Json {
     platformName: row.platform_name,
     accountType: row.account_type,
     params: row.params || {},
+    parentTaskId: row.params?.parentTaskId || null,
+    taskKind: row.params?.taskKind || null,
     priority: Number(row.priority),
     status: row.task_status,
     scheduledAt: iso(row.scheduled_at_ms),
@@ -194,8 +196,11 @@ type CoverageLike = {
   failed?: number;
   newAccounts?: number;
   running?: number;
+  queued?: number;
   contentCount?: number;
   yesterday?: Json | null;
+  /** The child task that is currently queued for a rerun, if any. */
+  activeRerun?: Json | null;
 };
 
 /**
@@ -233,6 +238,12 @@ function applyCoverage(task: Json, coverage: CoverageLike): Json {
   task.failedAccounts = Number(coverage.failed || 0);
   task.newAccounts = Number(coverage.newAccounts || 0);
   task.coverageTotal = Number(coverage.total || 0);
+  // Accounts can be successful (their last attempt worked) and still be waiting
+  // for a rerun. The coverage counts stay based on the last completed attempt;
+  // the queue is a separate overlay so the list never claims a queued rerun has
+  // already produced fresh data.
+  task.queuedAccounts = Number(coverage.queued || 0);
+  task.activeRerun = coverage.activeRerun ?? null;
   // A retry lives in a child task with its own run, so the parent run's
   // content_metric_count stays at whatever the first attempt saved. The rows
   // the detail page shows come from every run, so the list has to use that
@@ -459,14 +470,63 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   );
   const pendingRows = await Promise.all(pendingResult.rows.map(async (row: any) => {
     const task = taskRow(row);
-    const { coverage, yesterday } = await loadTaskCoverage(pool, row);
-    return applyCoverage(task, { ...coverage, yesterday });
+    const { coverage, yesterday, activeRerun } = await loadTaskCoverage(pool, row);
+    return applyCoverage(task, { ...coverage, yesterday, activeRerun });
   }));
   const executedRows = await Promise.all(executedResult.rows.map(async (row: any) => {
     const task = taskRow(row);
-    const { coverage, yesterday } = await loadTaskCoverage(pool, row);
-    return applyCoverage(task, { ...coverage, yesterday });
+    const { coverage, yesterday, activeRerun } = await loadTaskCoverage(pool, row);
+    return applyCoverage(task, { ...coverage, yesterday, activeRerun });
   }));
+
+  // Child tasks are hidden from the day lists (the parent row already reports
+  // their result), but a queued or running child is an operator action waiting
+  // to happen. Return them separately so the page can show a queue with the
+  // same pause/cancel controls as a normal pending task.
+  const rerunsResult = await pool.query(
+    `select t.id, t.params->>'parentTaskId' as parent_task_id,
+            t.params->>'taskKind' as task_kind,
+            case when jsonb_typeof(t.params->'accountIds') = 'array'
+                 then jsonb_array_length(t.params->'accountIds') else 0 end as account_count,
+            t.platform_id, p.code as platform_code, p.name as platform_name,
+            coalesce(c.name, t.account_type, parent.account_type) as account_type,
+            t.status, t.priority, t.scheduled_at_ms, t.created_ts_ms, t.run_id,
+            parent.scheduled_at_ms as parent_scheduled_at_ms,
+            r.status as run_status, r.started_ts_ms, r.finished_ts_ms,
+            r.success_accounts, r.failed_accounts, r.total_accounts
+       from scrape_tasks t
+       join platforms p on p.id = t.platform_id
+       left join scrape_tasks parent on parent.id = t.params->>'parentTaskId'
+       left join account_categories c on c.id = coalesce(t.category_id, parent.category_id)
+       left join scrape_runs r on r.id = t.run_id
+      where t.params->>'parentTaskId' is not null
+        and t.status in ('pending', 'paused', 'running')
+      order by case t.status when 'running' then 0 when 'pending' then 1 else 2 end,
+               t.priority asc, t.scheduled_at_ms asc, t.created_ts_ms asc
+      limit 100`,
+  );
+  const reruns = rerunsResult.rows.map((row: any) => ({
+    id: row.id,
+    parentTaskId: row.parent_task_id,
+    kind: row.task_kind || "manual_rerun",
+    accountCount: Number(row.account_count || 0),
+    platformId: row.platform_id,
+    platformCode: row.platform_code,
+    platformName: row.platform_name,
+    accountType: row.account_type || null,
+    status: row.status,
+    priority: Number(row.priority || 0),
+    scheduledAt: iso(row.scheduled_at_ms),
+    createdAt: iso(row.created_ts_ms),
+    parentScheduledAt: iso(row.parent_scheduled_at_ms),
+    runId: row.run_id,
+    runStatus: row.run_status,
+    runStartedAt: iso(row.started_ts_ms),
+    runFinishedAt: iso(row.finished_ts_ms),
+    successAccounts: Number(row.success_accounts || 0),
+    failedAccounts: Number(row.failed_accounts || 0),
+  }));
+
   const pending = pendingRows;
   const executed = executedRows;
   const summary = {
@@ -476,11 +536,12 @@ async function listTasks(pool: any, date: string): Promise<Json> {
     success: executed.filter((task: any) => task.status === "success").length,
     failed: executed.filter((task: any) => task.status === "failed").length,
     cancelled: executed.filter((task: any) => task.status === "cancelled").length,
+    reruns: reruns.length,
     accountsSuccess: executed.reduce((sum: number, task: any) => sum + task.successAccounts, 0),
     accountsFailed: executed.reduce((sum: number, task: any) => sum + task.failedAccounts, 0),
     contentsSuccess: executed.reduce((sum: number, task: any) => sum + task.contentMetricCount, 0),
   };
-  return { date, summary, pending, executed };
+  return { date, summary, pending, executed, reruns };
 }
 
 
@@ -635,6 +696,63 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     byAccount.set(row.account_id, list);
   }
 
+  // A queued rerun has no scrape_runs row yet, so run_accounts alone would keep
+  // showing the previous attempt ("成功") while the account sits in the queue.
+  // Build the queue from the child task's accountIds instead. Accounts already
+  // started by a running child are not queued any more; their run_account row
+  // reports "running" and wins below.
+  const activeChildRows = childTasksResult.rows.filter((row: any) =>
+    ["pending", "paused", "running"].includes(row.status),
+  );
+  const startedByRun = new Map<string, Set<string>>();
+  for (const row of runAccountRows) {
+    if (!row.run_id) continue;
+    const started = startedByRun.get(row.run_id) || new Set<string>();
+    started.add(row.account_id);
+    startedByRun.set(row.run_id, started);
+  }
+  const queuedByAccount = new Map<string, Json>();
+  for (const row of activeChildRows) {
+    const ids: string[] = Array.isArray(row.account_ids)
+      ? row.account_ids.map((value: unknown) => String(value)).filter(Boolean)
+      : [];
+    if (!ids.length) continue;
+    const started = row.status === "running" ? startedByRun.get(row.run_id) : null;
+    for (const accountId of ids) {
+      if (started?.has(accountId)) continue;
+      // Rows arrive in creation order; a later queue entry replaces an older one.
+      queuedByAccount.set(accountId, {
+        taskId: row.id,
+        status: row.status,
+        kind: row.task_kind || "manual_rerun",
+        scheduledAt: iso(row.scheduled_at_ms),
+        createdAt: iso(row.created_ts_ms),
+        accountCount: ids.length,
+      });
+    }
+  }
+
+  const statusRank: Record<string, number> = { running: 0, pending: 1, paused: 2 };
+  const activeChild = [...activeChildRows].sort((a: any, b: any) => {
+    const rank = (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9);
+    if (rank !== 0) return rank;
+    return Number(b.created_ts_ms || 0) - Number(a.created_ts_ms || 0);
+  })[0] || null;
+  const activeRerun = activeChild
+    ? {
+        id: activeChild.id,
+        status: activeChild.status,
+        kind: activeChild.task_kind || "manual_rerun",
+        accountCount: Array.isArray(activeChild.account_ids) ? activeChild.account_ids.length : 0,
+        scheduledAt: iso(activeChild.scheduled_at_ms),
+        createdAt: iso(activeChild.created_ts_ms),
+        runStartedAt: iso(activeChild.started_ts_ms),
+        runFinishedAt: iso(activeChild.finished_ts_ms),
+        successAccounts: Number(activeChild.success_accounts || 0),
+        failedAccounts: Number(activeChild.failed_accounts || 0),
+      }
+    : null;
+
   // The day before this task's business day is the comparison baseline. Pending
   // tasks have no run yet, so they skip the extra query and show no comparison.
   const dayKey = taskDayKey(task);
@@ -668,6 +786,9 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
       createdAt: account.created_at,
       updatedAt: account.updated_at,
       status,
+      // Display overlay only: `status` stays the last completed attempt so
+      // coverage, filters and retry buttons keep their existing meaning.
+      queue: account.active && status !== "running" ? queuedByAccount.get(account.id) || null : null,
       latestRunId: latest?.run_id || null,
       latestRunStatus: latest?.run_status || null,
       latestRunStartedAt: iso(latest?.run_started_ts_ms),
@@ -696,6 +817,7 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     failed: active.filter((account: any) => account.status === "failed" || account.status === "partial").length,
     newAccounts: active.filter((account: any) => account.status === "pending").length,
     running: active.filter((account: any) => account.status === "running").length,
+    queued: active.filter((account: any) => Boolean(account.queue)).length,
     zeroContent: active.filter((account: any) => account.status === "success" && Number(account.contentCountInWindow || 0) === 0).length,
     disabled: accounts.length - active.length,
   };
@@ -770,6 +892,8 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     contentMetricCount: Number(row.content_metric_count || 0),
     id: row.id,
     status: row.status,
+    scheduledAt: iso(row.scheduled_at_ms),
+    createdAt: iso(row.created_ts_ms),
     runId: row.run_id,
     runStatus: row.run_status,
     runStartedAt: iso(row.started_ts_ms),
@@ -782,6 +906,7 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     coverage: { ...coverage, contentCount: contents.length },
     childTasks,
     yesterday,
+    activeRerun,
   };
 }
 
@@ -790,7 +915,11 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
   if (!taskResult.rows.length) return null;
   const rawTask = taskResult.rows[0];
   const coverageData = await loadTaskCoverage(pool, rawTask);
-  const task = applyCoverage(taskRow(rawTask), { ...coverageData.coverage, yesterday: coverageData.yesterday });
+  const task = applyCoverage(taskRow(rawTask), {
+    ...coverageData.coverage,
+    yesterday: coverageData.yesterday,
+    activeRerun: coverageData.activeRerun,
+  });
 
   let run: Json | null = null;
   if (task.runId) {
@@ -1446,6 +1575,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       const parent = parentResult.rows[0];
       if (parent.params?.parentTaskId) return fail(409, "请从主任务发起补跑");
       if (parent.status === "paused") return fail(409, "任务已暂停，请先继续执行");
+      // A rerun of a task that has not produced its first result (or is still
+      // producing it) would duplicate the same accounts in two runs.
+      if (parent.status === "pending") return fail(409, "任务尚未执行，不能补跑");
+      if (parent.status === "running") return fail(409, "任务正在执行，请等执行结束后再补跑");
       const body = await readJson(request);
       const mode = text(body.mode);
       if (!["failed", "new", "selected"].includes(mode)) return fail(400, "mode 必须是 failed、new 或 selected");
@@ -1516,6 +1649,32 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       );
       const task = await handle.pool.query(`${taskSelect} where t.id = $1`, [id]);
       return json(200, { task: taskRow(task.rows[0]) });
+    }
+    const taskCancelMatch = path.match(/^\/api\/tasks\/([^/]+)\/cancel$/);
+    if (method === "POST" && taskCancelMatch) {
+      const id = decodeURIComponent(taskCancelMatch[1]);
+      const now = Date.now();
+      // Cancelling keeps the row (and its child relationship) for the audit
+      // trail, unlike DELETE which removes the task entirely.
+      const updated = await handle.pool.query(
+        `update scrape_tasks
+            set status = 'cancelled',
+                lease_owner = null,
+                lease_until_ms = null,
+                updated_ts_ms = $2
+          where id = $1 and status in ('pending', 'paused')
+          returning id`,
+        [id, now],
+      );
+      if (!updated.rows.length) {
+        const current = await handle.pool.query("select status from scrape_tasks where id = $1", [id]);
+        if (!current.rows.length) return fail(404, "任务不存在");
+        const status = current.rows[0].status;
+        if (status === "cancelled") return json(200, { ok: true, id, status, already: true });
+        if (status === "running") return fail(409, "任务正在执行，无法取消");
+        return fail(409, "任务已结束，无法取消");
+      }
+      return json(200, { ok: true, id, status: "cancelled" });
     }
     const taskPauseMatch = path.match(/^\/api\/tasks\/([^/]+)\/pause$/);
     if (method === "POST" && taskPauseMatch) {

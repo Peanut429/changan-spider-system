@@ -4,23 +4,29 @@ import {
   ArrowLeft,
   CalendarClock,
   CircleAlert,
+  CircleX,
   ChevronLeft,
   ChevronRight,
   Download,
   ExternalLink,
   FileText,
+  Hourglass,
   Info,
+  LoaderCircle,
+  Pause,
+  Play,
   RefreshCw,
   UsersRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 
-import { getTask, rerunTask } from '@/lib/api'
+import { cancelTask, getTask, pauseTask, rerunTask, resumeTask } from '@/lib/api'
 import { downloadTaskExcel } from '@/lib/export-task'
-import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
+import type { ActiveRerun, TaskAccount, TaskChildRun, TaskContent, TaskDetailResponse } from '@/lib/types'
 import { dateKeyFromDate, formatClock, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
+import { CancelTaskDialog } from '@/components/cancel-task-dialog'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
@@ -66,6 +72,38 @@ const coverageMeta: Record<string, { label: string; className: string; dot: stri
 }
 
 function CoverageStatus({ account }: { account: TaskAccount }) {
+  if (account.queue) {
+    const state = account.queue.status
+    const last = account.status === 'success'
+      ? '上次成功'
+      : account.status === 'partial'
+        ? '上次部分失败'
+        : account.status === 'failed'
+          ? '上次失败'
+          : null
+    const note = state === 'paused'
+      ? '补跑已暂停'
+      : state === 'running'
+        ? '补跑执行中，等待账号'
+        : '补跑排队中'
+    const title = state === 'paused'
+      ? `补跑任务已暂停，不会自动执行${account.queue.accountCount > 1 ? `（本次共 ${account.queue.accountCount} 个账号）` : ''}`
+      : state === 'running'
+        ? '补跑任务执行中，该账号还在等待'
+        : `补跑排队中${account.queue.scheduledAt ? `，加入队列 ${formatClock(account.queue.scheduledAt)}` : ''}${account.queue.accountCount > 1 ? `（本次共 ${account.queue.accountCount} 个账号）` : ''}`
+    return (
+      <span className="cx-queue-status" data-state={state} title={title}>
+        <span className="cx-queue-status-label">
+          <span className="cx-queue-status-dot" />
+          {state === 'paused' ? '已暂停' : '待执行'}
+        </span>
+        <span className="cx-queue-status-note">
+          {note}{last ? ` · ${last}` : ''}
+        </span>
+      </span>
+    )
+  }
+
   const isZero = account.status === 'success' && Number(account.contentCountInWindow || 0) === 0
   const meta = isZero
     ? { label: '无数据', className: 'text-amber-400', dot: 'bg-amber-400' }
@@ -116,16 +154,152 @@ type ConfirmAction = {
   description: string
 }
 
+function rerunKindLabel(kind: string): string {
+  return kind === 'retry_failed' ? '失败重试' : kind === 'backfill_new' ? '补充新增' : '手动重跑'
+}
+
+/** Pause/resume/cancel a child task, then refresh the parent detail and list. */
+function useRerunAction(taskId: string) {
+  const queryClient = useQueryClient()
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const run = async (id: string, action: 'pause' | 'resume' | 'cancel') => {
+    setBusyId(id)
+    try {
+      if (action === 'pause') await pauseTask(id)
+      else if (action === 'resume') await resumeTask(id)
+      else await cancelTask(id)
+      toast.success(
+        action === 'pause' ? '已暂停补跑任务' : action === 'resume' ? '已继续补跑任务' : '已取消补跑任务',
+      )
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '操作补跑任务失败')
+      return false
+    } finally {
+      setBusyId(null)
+      void queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    }
+  }
+  return { busyId, run }
+}
+
+function RerunQueueBanner({
+  rerun,
+  busy,
+  onAction,
+  onCancel,
+}: {
+  rerun: ActiveRerun
+  busy: boolean
+  onAction: (action: 'pause' | 'resume') => void
+  onCancel: () => void
+}) {
+  const done = rerun.successAccounts + rerun.failedAccounts
+  const label = rerun.status === 'running'
+    ? '补跑执行中'
+    : rerun.status === 'paused'
+      ? '补跑已暂停'
+      : '补跑排队中'
+  return (
+    <div className="cx-rerun" data-state={rerun.status}>
+      <span className="cx-rerun-icon">
+        {rerun.status === 'running'
+          ? <LoaderCircle className="size-4 animate-spin" />
+          : rerun.status === 'paused'
+            ? <Pause className="size-4" />
+            : <Hourglass className="size-4" />}
+      </span>
+      <div className="cx-rerun-body">
+        <p className="cx-rerun-title">
+          {label}
+          <em>{rerunKindLabel(rerun.kind)} · {rerun.accountCount} 个账号</em>
+        </p>
+        <p className="cx-rerun-detail">
+          {rerun.status === 'running'
+            ? `已完成 ${done}/${rerun.accountCount}${rerun.runStartedAt ? ` · 开始 ${formatClock(rerun.runStartedAt)}` : ''}`
+            : rerun.status === 'paused'
+              ? `不会自动执行，可以继续或取消${rerun.createdAt ? ` · 创建于 ${formatDateTime(rerun.createdAt)}` : ''}`
+              : `等待 worker 领取，可以暂停或取消${rerun.createdAt ? ` · 创建于 ${formatDateTime(rerun.createdAt)}` : ''}`}
+        </p>
+      </div>
+      <div className="cx-rerun-actions">
+        {rerun.status === 'pending' ? (
+          <Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => onAction('pause')}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Pause className="size-3.5" />}
+            暂停
+          </Button>
+        ) : null}
+        {rerun.status === 'paused' ? (
+          <Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => onAction('resume')}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+            继续
+          </Button>
+        ) : null}
+        {rerun.status === 'pending' || rerun.status === 'paused' ? (
+          <Button size="sm" variant="ghost" className="cx-rerun-cancel gap-1.5" disabled={busy} onClick={onCancel}>
+            <CircleX className="size-3.5" />
+            取消补跑
+          </Button>
+        ) : null}
+        {rerun.status === 'running' ? <span className="cx-rerun-live">执行中，当前不可取消</span> : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The rerun is a task-level state, so the banner lives above the tabs and
+ * stays reachable from 账号数据、帖子数据 and 执行信息 alike.
+ */
+function ActiveRerunPanel({ rerun, taskId }: { rerun: ActiveRerun; taskId: string }) {
+  const { busyId, run } = useRerunAction(taskId)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  return (
+    <>
+      <RerunQueueBanner
+        rerun={rerun}
+        busy={busyId === rerun.id}
+        onAction={(action) => {
+          void run(rerun.id, action)
+        }}
+        onCancel={() => setCancelOpen(true)}
+      />
+      <CancelTaskDialog
+        target={cancelOpen
+          ? {
+              id: rerun.id,
+              accountCount: rerun.accountCount,
+              title: `取消这次${rerunKindLabel(rerun.kind)}？`,
+              description: `将取消 ${rerun.accountCount} 个账号的补跑。这些账号不会重新执行，已经抓到的数据不受影响。`,
+            }
+          : null}
+        busy={busyId === rerun.id}
+        onClose={() => setCancelOpen(false)}
+        onConfirm={(id) => {
+          void run(id, 'cancel').then((ok) => {
+            if (ok) setCancelOpen(false)
+          })
+        }}
+      />
+    </>
+  )
+}
+
 function AccountTable({
   accounts,
   coverage,
   taskId,
   yesterday,
+  activeRerun,
+  canRerun,
 }: {
   accounts: TaskAccount[]
   coverage: TaskDetailResponse['coverage']
   taskId: string
   yesterday: TaskDetailResponse['yesterday']
+  activeRerun: ActiveRerun | null
+  canRerun: boolean
 }) {
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
@@ -138,18 +312,29 @@ function AccountTable({
   const zero = accounts.filter((a) => a.status === 'success' && Number(a.contentCountInWindow || 0) === 0)
   const success = accounts.filter((a) => a.status === 'success')
   const disabled = accounts.filter((a) => a.status === 'disabled')
-  const effectiveFilter = filter || (failed.length + newAccounts.length > 0 ? 'action' : 'all')
+  const queued = accounts.filter((a) => a.queue)
+  // Buttons can only chase accounts that are not already on their way back.
+  const retryTargets = failed.filter((a) => !a.queue)
+  const newTargets = newAccounts.filter((a) => !a.queue)
+  const effectiveFilter = filter || (failed.length + newAccounts.length > 0 ? 'action' : queued.length > 0 ? 'queued' : 'all')
   const filtered = useMemo(() => {
     if (effectiveFilter === 'action') return accounts.filter((a) => a.status === 'failed' || a.status === 'partial' || (a.status === 'pending' && a.isNew));
     if (effectiveFilter === 'failed') return failed;
     if (effectiveFilter === 'new') return newAccounts;
+    if (effectiveFilter === 'queued') return queued;
     if (effectiveFilter === 'zero') return zero;
     if (effectiveFilter === 'success') return success;
     if (effectiveFilter === 'disabled') return disabled;
     return accounts;
-  }, [accounts, effectiveFilter, failed, newAccounts, zero, success, disabled])
-  const selectable = filtered.filter((a) => a.status !== 'disabled')
+  }, [accounts, effectiveFilter, failed, newAccounts, queued, zero, success, disabled])
+  const selectable = canRerun ? filtered.filter((a) => a.status !== 'disabled' && !a.queue) : []
   const allSelected = selectable.length > 0 && selectable.every((a) => selected.has(a.accountId))
+
+  // A worker can claim the queued rerun while the operator still has a
+  // selection from before; the selection must not survive into the next batch.
+  useEffect(() => {
+    if (!canRerun) setSelected(new Set())
+  }, [canRerun])
 
   const toggle = (id: string, checked: boolean) => {
     setSelected((current) => {
@@ -183,7 +368,7 @@ function AccountTable({
     setSubmitting(true)
     try {
       await rerunTask(taskId, confirm.mode, confirm.ids)
-      toast.success('已创建补跑任务')
+      toast.success(`已加入补跑队列（${confirm.ids.length} 个账号），可在上方查看、暂停或取消`)
       setSelected(new Set())
       setConfirm(null)
       await queryClient.invalidateQueries({ queryKey: ['task', taskId] })
@@ -204,6 +389,7 @@ function AccountTable({
     { key: 'action', label: '需处理', count: failed.length + newAccounts.length },
     { key: 'failed', label: '失败', count: failed.length },
     { key: 'new', label: '新增待补', count: newAccounts.length },
+    { key: 'queued', label: '排队中', count: queued.length },
     { key: 'zero', label: '无数据', count: zero.length },
     { key: 'success', label: '成功', count: success.length },
     { key: 'disabled', label: '已禁用', count: disabled.length },
@@ -218,6 +404,11 @@ function AccountTable({
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               成功 {coverage.success} · 失败 {coverage.failed} · 运行中 {coverage.running} · 新增待补 {coverage.newAccounts} · 已禁用 {coverage.disabled}
             </p>
+            {coverage.queued > 0 ? (
+              <p className="mt-0.5 text-[11px] text-[var(--cx-warn)]">
+                其中 {coverage.queued} 个账号在补跑队列中
+              </p>
+            ) : null}
             {yesterday ? (
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 昨日 {yesterday.date.slice(5)} 覆盖 {yesterday.accountsWithData}/{yesterday.total} · 内容 {formatNumber(yesterday.contentCount)}
@@ -225,8 +416,13 @@ function AccountTable({
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {failed.length > 0 ? <Button size="sm" variant="outline" onClick={() => ask('failed', failed.map((a) => a.accountId))}><RefreshCw className="size-3.5" />重试失败 {failed.length}</Button> : null}
-            {newAccounts.length > 0 ? <Button size="sm" onClick={() => ask('new', newAccounts.map((a) => a.accountId))}><UsersRound className="size-3.5" />补新增 {newAccounts.length}</Button> : null}
+            {retryTargets.length > 0 ? <Button size="sm" variant="outline" disabled={!canRerun} onClick={() => ask('failed', retryTargets.map((a) => a.accountId))}><RefreshCw className="size-3.5" />重试失败 {retryTargets.length}</Button> : null}
+            {newTargets.length > 0 ? <Button size="sm" disabled={!canRerun} onClick={() => ask('new', newTargets.map((a) => a.accountId))}><UsersRound className="size-3.5" />补新增 {newTargets.length}</Button> : null}
+            {!canRerun ? (
+              <span className="cx-hint self-center">
+                {activeRerun ? '已有补跑任务在队列中，完成后再补跑' : '任务执行结束后才能补跑'}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -247,10 +443,10 @@ function AccountTable({
             activeTextColor="var(--cx-ink)"
           />
         </div>
-        <span className="cx-hint">“需处理” = 失败账号 + 新增待补账号</span>
+        <span className="cx-hint">“需处理” = 失败账号 + 新增待补账号；排队中的账号已在补跑队列里</span>
       </div>
 
-      {selected.size > 0 ? (
+      {canRerun && selected.size > 0 ? (
         <div className="sticky top-2 z-10 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
           <span>已选 {selected.size} 个账号</span>
           <div className="flex gap-2">
@@ -267,6 +463,7 @@ function AccountTable({
               <TableHead className="w-10">
                 <Checkbox
                   checked={allSelected ? true : selectable.some((a) => selected.has(a.accountId)) ? 'indeterminate' : false}
+                  disabled={!canRerun || selectable.length === 0}
                   onCheckedChange={(value) => toggleAll(value === true)}
                   aria-label="选择当前筛选账号"
                 />
@@ -292,7 +489,14 @@ function AccountTable({
                 <TableCell>
                   <Checkbox
                     checked={selected.has(account.accountId)}
-                    disabled={account.status === 'disabled'}
+                    disabled={!canRerun || account.status === 'disabled' || Boolean(account.queue)}
+                    title={account.queue
+                      ? '已在补跑队列中'
+                      : activeRerun
+                        ? '已有补跑任务在队列中，完成后再补跑'
+                        : !canRerun
+                          ? '任务执行结束后才能补跑'
+                          : undefined}
                     onCheckedChange={(value) => toggle(account.accountId, value === true)}
                     aria-label={`选择 ${account.handle}`}
                   />
@@ -318,9 +522,20 @@ function AccountTable({
                   ) : <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">—</span>}
                 </TableCell>
                 <TableCell className="text-right">
-                  {account.status !== 'disabled' ? (
+                  {account.queue ? (
+                    <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-[var(--cx-warn)]">已排队</span>
+                  ) : account.status === 'disabled' ? (
+                    <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">不可操作</span>
+                  ) : !canRerun ? (
+                    <span
+                      className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground"
+                      title={activeRerun ? '已有补跑任务在队列中，完成后再补跑' : '任务执行结束后才能补跑'}
+                    >
+                      —
+                    </span>
+                  ) : (
                     <Button size="sm" variant="ghost" onClick={() => ask('selected', [account.accountId])}>重跑</Button>
-                  ) : <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">不可操作</span>}
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -456,12 +671,139 @@ function ContentTable({ contents }: { contents: TaskContent[] }) {
   )
 }
 
+function ChildTaskTable({
+  childTasks,
+  parentTaskId,
+}: {
+  childTasks: TaskChildRun[]
+  parentTaskId: string
+}) {
+  const { busyId, run } = useRerunAction(parentTaskId)
+  const [cancelTarget, setCancelTarget] = useState<TaskChildRun | null>(null)
+  const childDate = (child: TaskChildRun) => {
+    const value = child.scheduledAt || child.createdAt
+    return value ? dateKeyFromDate(new Date(value)) : todayKey()
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+              <TableHead>类型</TableHead>
+              <TableHead>状态</TableHead>
+              <TableHead className="text-right">账号</TableHead>
+              <TableHead className="text-right">内容</TableHead>
+              <TableHead>开始</TableHead>
+              <TableHead>结束</TableHead>
+              <TableHead className="text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {childTasks.map((child) => {
+              const busy = busyId === child.id
+              const total = child.accountCount || child.plannedAccounts
+              const active = child.status === 'pending' || child.status === 'paused'
+              return (
+                <TableRow key={child.id}>
+                  <TableCell className="text-xs">{rerunKindLabel(child.kind)}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <StatusBadge status={child.status} runStatus={child.runStatus} />
+                      {active ? (
+                        <span className="text-[10px] text-muted-foreground">
+                          {child.status === 'paused'
+                            ? '不会自动执行'
+                            : `加入队列 ${formatDateTime(child.scheduledAt)}`}
+                        </span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {active ? `—/${total}` : `${child.successAccounts}/${total}`}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{child.contentMetricCount}</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runStartedAt)}</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runFinishedAt)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {child.status === 'pending' ? (
+                        <Button size="sm" variant="ghost" className="gap-1.5" disabled={busy} onClick={() => void run(child.id, 'pause')}>
+                          {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Pause className="size-3.5" />}
+                          暂停
+                        </Button>
+                      ) : null}
+                      {child.status === 'paused' ? (
+                        <Button size="sm" variant="ghost" className="gap-1.5" disabled={busy} onClick={() => void run(child.id, 'resume')}>
+                          {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                          继续
+                        </Button>
+                      ) : null}
+                      {active ? (
+                        <Button size="sm" variant="ghost" className="cx-rerun-cancel gap-1.5" disabled={busy} onClick={() => setCancelTarget(child)}>
+                          <CircleX className="size-3.5" />
+                          取消
+                        </Button>
+                      ) : null}
+                      <Button asChild size="sm" variant="ghost">
+                        <Link
+                          to="/tasks/$taskId"
+                          params={{ taskId: child.id }}
+                          search={{ date: childDate(child) }}
+                        >
+                          查看
+                        </Link>
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <CancelTaskDialog
+        target={cancelTarget
+          ? {
+              id: cancelTarget.id,
+              accountCount: cancelTarget.accountCount,
+              title: `取消这次${rerunKindLabel(cancelTarget.kind)}？`,
+              description: `将取消 ${cancelTarget.accountCount} 个账号的补跑。这些账号不会重新执行，已经抓到的数据不受影响。`,
+            }
+          : null}
+        busy={Boolean(cancelTarget && busyId === cancelTarget.id)}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={(id) => {
+          void run(id, 'cancel').then((ok) => {
+            if (ok) setCancelTarget(null)
+          })
+        }}
+      />
+    </>
+  )
+}
+
 function TaskDetailPage() {
   const { taskId } = Route.useParams()
   const reduceMotion = useReducedMotion()
   const { theme } = useTheme()
   const [view, setView] = useState('accounts')
-  const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) })
+  const query = useQuery({
+    queryKey: ['task', taskId],
+    queryFn: () => getTask(taskId),
+    // A queued rerun moves to "running" on the worker's schedule; keep the
+    // detail current while there is live work instead of making the operator
+    // reload to find out whether the click landed.
+    refetchInterval: (current) => {
+      const data = current.state.data
+      if (!data) return false
+      const rerun = data.task.activeRerun
+      const live = data.task.status === 'running' || Boolean(rerun && rerun.status !== 'paused')
+      return live ? 8000 : false
+    },
+  })
 
   if (query.isPending) {
     return (
@@ -491,6 +833,18 @@ function TaskDetailPage() {
   }
 
   const { task, run, accounts, contents, coverage, childTasks, yesterday } = query.data
+  // A rerun is a child task, so the parent row can be "success" while work is
+  // still queued. The header needs to say that out loud.
+  const canRerun = !task.parentTaskId
+    && !task.activeRerun
+    && !['pending', 'running', 'paused'].includes(task.status)
+  const rerunLabel = task.activeRerun
+    ? task.activeRerun.status === 'running'
+      ? '补跑执行中'
+      : task.activeRerun.status === 'paused'
+        ? '补跑已暂停'
+        : '补跑排队中'
+    : null
   // The list groups tasks by their planned day, so go back there rather than to
   // the day a late run happened to start.
   const backDate = task.scheduledAt
@@ -546,6 +900,15 @@ function TaskDetailPage() {
             <div className="flex flex-wrap items-center gap-2.5">
               <PlatformMark code={task.platformCode} name={task.platformName} size="sm" />
               <StatusBadge status={task.status} runStatus={task.runStatus} />
+              {rerunLabel && task.activeRerun ? (
+                <Badge
+                  variant="outline"
+                  className="cx-rerun-badge font-normal"
+                  data-state={task.activeRerun.status}
+                >
+                  {rerunLabel} · {task.activeRerun.accountCount} 个账号
+                </Badge>
+              ) : null}
               <Badge variant="outline" className="font-normal">{task.accountType || '未设置账号类型'}</Badge>
             </div>
             <div className="text-right text-[11px] text-muted-foreground">
@@ -556,7 +919,12 @@ function TaskDetailPage() {
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="抓取范围（UTC+8）" value={formatWindow(task.windowSince, task.windowUntil)} />
             <Metric label="实际开始" value={formatFullDateTime(run?.startedAt ?? task.runStartedAt)} />
-            <Metric label="实际结束" value={task.status === 'running' ? '进行中' : formatFullDateTime(run?.finishedAt ?? task.runFinishedAt)} />
+            <Metric
+              label="实际结束"
+              value={task.status === 'running' && !task.activeRerun
+                ? '进行中'
+                : formatFullDateTime(run?.finishedAt ?? task.runFinishedAt)}
+            />
             <Metric label="账号覆盖（成功/总数）" value={`${coverage.success} / ${coverage.total}`} />
           </div>
 
@@ -568,6 +936,8 @@ function TaskDetailPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {task.activeRerun ? <ActiveRerunPanel rerun={task.activeRerun} taskId={task.id} /> : null}
 
       <Tabs value={view} onValueChange={setView} className="flex-col gap-4">
         <div className="cx-viewtabs">
@@ -614,7 +984,16 @@ function TaskDetailPage() {
           />
         </div>
 
-        <TabsContent value="accounts"><AccountTable accounts={accounts} coverage={coverage} taskId={task.id} yesterday={yesterday} /></TabsContent>
+        <TabsContent value="accounts">
+          <AccountTable
+            accounts={accounts}
+            coverage={coverage}
+            taskId={task.id}
+            yesterday={yesterday}
+            activeRerun={task.activeRerun}
+            canRerun={canRerun}
+          />
+        </TabsContent>
         <TabsContent value="contents"><ContentTable contents={contents} /></TabsContent>
         <TabsContent value="run">
           {run ? (
@@ -653,30 +1032,7 @@ function TaskDetailPage() {
               <Card>
                 <CardHeader className="pb-3"><CardTitle className="text-sm">补跑记录</CardTitle></CardHeader>
                 <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
-                        <TableHead>类型</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead className="text-right">账号</TableHead>
-                        <TableHead className="text-right">内容</TableHead>
-                        <TableHead>开始</TableHead>
-                        <TableHead>结束</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {childTasks.map((child) => (
-                        <TableRow key={child.id}>
-                          <TableCell className="text-xs">{child.kind === 'retry_failed' ? '失败重试' : child.kind === 'backfill_new' ? '新增补数据' : '手动重跑'}</TableCell>
-                          <TableCell><StatusBadge status={child.status} runStatus={child.runStatus} /></TableCell>
-                          <TableCell className="text-right tabular-nums">{child.successAccounts}/{child.accountCount || child.plannedAccounts}</TableCell>
-                          <TableCell className="text-right tabular-nums">{child.contentMetricCount}</TableCell>
-                          <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runStartedAt)}</TableCell>
-                          <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(child.runFinishedAt)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <ChildTaskTable childTasks={childTasks} parentTaskId={task.id} />
                 </CardContent>
               </Card>
             ) : null}
