@@ -7,6 +7,7 @@
 -- 仅用于 changan_rpa_test，不要在生产库执行。
 -- ============================================================
 
+drop table if exists comment_jobs cascade;
 drop table if exists scrape_tasks cascade;
 drop table if exists account_category_members cascade;
 drop table if exists account_categories cascade;
@@ -71,6 +72,7 @@ create table social_contents (
 );
 create index idx_social_contents_platform_id on social_contents (platform_id);
 create index idx_social_contents_account_id on social_contents (account_id);
+create index idx_social_contents_account_publish on social_contents (account_id, publish_ts_ms);
 create index idx_social_contents_publish_ts_ms on social_contents (publish_ts_ms desc);
 create index idx_social_contents_last_seen_ts_ms on social_contents (last_seen_ts_ms desc);
 create index idx_social_contents_type on social_contents (content_type);
@@ -250,7 +252,7 @@ create index idx_scrape_event_logs_step on scrape_event_logs (step);
 create index idx_scrape_event_logs_error_code on scrape_event_logs (error_code);
 create index idx_scrape_event_logs_created_ts_ms on scrape_event_logs (created_ts_ms desc);
 
--- 10. 评论（当前不迁，保留表以便 schema 与生产一致）
+-- 10. 评论（评论任务写这张表；新增列只在有值时写入，旧行保持 null）
 create table comment (
   id text primary key,
   username text default '',
@@ -258,12 +260,24 @@ create table comment (
   text_content text default '',
   platform varchar(100),
   content_id text,
-  create_timestamp bigint default 0
+  create_timestamp bigint default 0,
+  account_id text,
+  run_id text,
+  like_count bigint,
+  reply_count bigint,
+  parent_comment_id text,
+  root_comment_id text,
+  first_seen_ts_ms bigint,
+  last_seen_ts_ms bigint
 );
 create index idx_comment_user_id on comment (user_id);
 create index idx_comment_platform on comment (platform);
 create index idx_comment_content_id on comment (content_id);
 create index idx_comment_create_timestamp on comment (create_timestamp);
+create index idx_comment_account_id on comment (account_id);
+create index idx_comment_run_id on comment (run_id);
+create index idx_comment_parent on comment (parent_comment_id);
+create index idx_comment_root on comment (root_comment_id);
 
 -- 11. 账号分类（账号与分类多对多）
 create table account_categories (
@@ -284,7 +298,39 @@ create table account_category_members (
 );
 create index idx_account_category_members_category on account_category_members (category_id);
 
--- 12. 任务队列（平台/分类/参数都从数据库来）
+-- 12. 评论抓取任务（Web 手动触发，纯接口）
+create table comment_jobs (
+  id text primary key,
+  status text not null default 'pending',
+  account_ids jsonb not null default '[]'::jsonb,
+  platform_codes jsonb not null default '[]'::jsonb,
+  window_since_ts_ms bigint not null,
+  window_until_ts_ms bigint not null,
+  options jsonb not null default '{}'::jsonb,
+  total_accounts int not null default 0,
+  processed_accounts int not null default 0,
+  success_accounts int not null default 0,
+  failed_accounts int not null default 0,
+  total_posts int not null default 0,
+  processed_posts int not null default 0,
+  fetched_comments int not null default 0,
+  inserted_comments int not null default 0,
+  updated_comments int not null default 0,
+  failed_posts int not null default 0,
+  run_ids jsonb not null default '[]'::jsonb,
+  error_message text,
+  created_ts_ms bigint not null,
+  started_ts_ms bigint,
+  finished_ts_ms bigint,
+  updated_ts_ms bigint not null,
+  constraint ck_comment_jobs_status check (
+    status in ('pending', 'running', 'success', 'partial_failed', 'failed', 'cancelled')
+  )
+);
+create index idx_comment_jobs_status on comment_jobs (status, created_ts_ms desc);
+create index idx_comment_jobs_created on comment_jobs (created_ts_ms desc);
+
+-- 13. 任务队列（平台/分类/参数都从数据库来）
 create table scrape_tasks (
   id text primary key,
   platform_id text not null references platforms(id),

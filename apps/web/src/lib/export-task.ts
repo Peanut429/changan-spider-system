@@ -1,9 +1,5 @@
+import { exportNumber, exportText, formatExportDateTime } from './export-format'
 import type { Task, TaskAccount, TaskContent } from './types'
-
-const clean = (value: unknown) => {
-  if (value === null || value === undefined) return ''
-  return String(value).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
-}
 
 export async function downloadTaskExcel({
   task,
@@ -19,9 +15,9 @@ export async function downloadTaskExcel({
 
   const accountHeaders = ['平台', '账号', '主页链接', '账号类型', '粉丝数', '关注数', '帖子数']
   const accountRows = accounts.map((account) => [
-    clean(task.platformCode), clean(account.handle), clean(account.profileUrl),
-    clean(task.accountType), account.followersCount ?? '', account.followingCount ?? '',
-    account.postsCount ?? '',
+    exportText(task.platformCode), exportText(account.handle), exportText(account.profileUrl),
+    exportText(task.accountType), exportNumber(account.followersCount), exportNumber(account.followingCount),
+    exportNumber(account.postsCount),
   ])
   const accountSheet = XLSX.utils.aoa_to_sheet([accountHeaders, ...accountRows])
   accountSheet['!cols'] = [
@@ -34,11 +30,12 @@ export async function downloadTaskExcel({
     '播放数', '阅读数', '曝光数', '点赞数', '评论数', '转发数', '收藏数',
   ]
   const postRows = contents.map((content) => [
-    clean(task.platformCode), clean(content.accountHandle), clean(content.contentType),
-    clean(content.title), clean(content.summary), clean(content.url), clean(content.publishTime),
-    content.playCount ?? '', content.readCount ?? '', content.exposureCount ?? '',
-    content.likeCount ?? '', content.commentCount ?? '', content.shareCount ?? '',
-    content.collectCount ?? '',
+    exportText(task.platformCode), exportText(content.accountHandle), exportText(content.contentType),
+    exportText(content.title), exportText(content.summary), exportText(content.url),
+    formatExportDateTime(content.publishTime),
+    exportNumber(content.playCount), exportNumber(content.readCount), exportNumber(content.exposureCount),
+    exportNumber(content.likeCount), exportNumber(content.commentCount), exportNumber(content.shareCount),
+    exportNumber(content.collectCount),
   ])
   const postSheet = XLSX.utils.aoa_to_sheet([postHeaders, ...postRows])
   postSheet['!cols'] = [

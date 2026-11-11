@@ -51,7 +51,7 @@ SOCIAL_BROWSER_MODE
 SOCIAL_BROWSER_USER_DATA_DIR
 SOCIAL_BROWSER_PROFILE_DIRECTORY
 SOCIAL_BROWSER_EXECUTABLE
-TIKHUB_API_KEY   # 只有跑 Instagram 时需要
+TIKHUB_API_KEY   # Instagram / TikTok / 评论任务需要
 ```
 
 YouTube 默认优先走 HTTP 接口（浏览器只用来拿登录态和频道首屏），接口失败会自动降级回纯浏览器页面抓取。
@@ -96,6 +96,36 @@ pnpm --filter @changan/crawler worker
 Worker 不开放端口，只轮询 `scrape_tasks`。
 
 不要同时启动两个使用同一个 Chrome profile 的 worker；它们会争抢浏览器 profile。
+
+### 评论任务
+
+评论任务**只走 TikHub HTTP 接口，不启动浏览器**，和上面的 worker 可以同时跑。
+支持 `instagram / tiktok / youtube / x`；Facebook / LinkedIn 没有评论接口，不抓。
+帖子从库里已有的 `social_contents` 读取，只补评论（含二级回复）。
+
+页面上也可以看：账号管理 → 点账号进「账号详情」→ 帖子列表（按帖子发布时间筛选）→ 点帖子看评论；
+帖子列表和帖子详情都支持导出 Excel 评论。
+
+也可以直接在 Web 的「评论抓取」页手动触发（选账号 + 帖子发布时间范围），任务在 Web 进程内后台执行，
+不需要额外 worker。首次使用前需要在数据库执行 `apps/crawler/db/comment-jobs-upgrade.sql`，
+并给 Web 进程配置 `TIKHUB_API_KEY`；详见 DEPLOY.md 9.2。
+
+```bash
+# 看帮助
+pnpm comment:help
+
+# 先看范围（不调接口、不写库）
+pnpm comment:run -- --dry-run --last-month --account-type 总部
+
+# 跑上月所有接口平台
+pnpm comment:run -- --last-month --account-type 总部
+
+# 单账号、指定范围
+pnpm comment:run -- --platforms instagram --account byd.uk --since 2026-09-01 --until 2026-09-30
+```
+
+账号类型名以库里 `account_categories` 为准；本机测试库当前是 `总部账号`，生产库常见 `总部` / `中南美-月报`。
+本地怎么跑（迁移、Key、dry-run、单账号试跑、查结果 SQL）见 [apps/crawler/COMMENTS.md](apps/crawler/COMMENTS.md)；服务器每月 cron 见 [DEPLOY.md](./DEPLOY.md) 第 9.1 节。
 
 ## 检查
 

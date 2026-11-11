@@ -1,10 +1,11 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import {
   ChevronLeft,
   ChevronRight,
   CirclePlus,
   FileSpreadsheet,
+  FileText,
   FilterX,
   Pencil,
   Search,
@@ -239,9 +240,15 @@ function AccountsPage() {
               </thead>
               <tbody>
                 {accounts.map((account) => (
-                  <tr key={account.id}>
+                  <tr key={account.id} className="cx-row">
                     <td data-block="true">
-                      <div className="cx-handle">{account.handle}</div>
+                      <Link
+                        className="cx-handle hover:underline"
+                        to="/account/$accountId"
+                        params={{ accountId: account.id }}
+                      >
+                        {account.handle}
+                      </Link>
                       <div className="cx-cell-sub">{account.displayName || account.profileUrl}</div>
                     </td>
                     <td data-label="平台">
@@ -272,6 +279,13 @@ function AccountsPage() {
                     </td>
                     <td data-label="操作" className="cx-right">
                       <div className="cx-row-actions">
+                        <Link
+                          className="cx-link"
+                          to="/account/$accountId"
+                          params={{ accountId: account.id }}
+                        >
+                          <FileText className="size-3.5" />查看帖子
+                        </Link>
                         <button
                           type="button"
                           className="cx-link"

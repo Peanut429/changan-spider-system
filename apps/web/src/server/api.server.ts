@@ -1,5 +1,12 @@
 import { openDatabase } from "@changan/db";
-import { prefixedId, endOfDayInTimeZone, scrapeWindowStartTsMs } from "@changan/shared";
+import {
+  createCommentJob,
+  getCommentJob,
+  listCommentJobs,
+  listFailedCommentPosts,
+  retryFailedCommentJob,
+} from "./comment-jobs.server.ts";
+import { prefixedId, endOfDayInTimeZone, scrapeWindowStartTsMs, dayKeyInTimeZone } from "@changan/shared";
 
 const TIME_ZONE = process.env.SCRAPE_TIMEZONE || "Asia/Shanghai";
 
@@ -43,6 +50,14 @@ async function readJson(request: Request): Promise<Json> {
 
 function text(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function databaseTarget(): { database: string; host: string; remote: boolean } {
+  const url = String(process.env.DATABASE_URL || "");
+  const match = url.match(/^postgres(?:ql)?:\/\/[^@]*@([^/:?]+)(?::\d+)?\/([^?]+)/i);
+  if (!match) return { database: "(无法解析)", host: "(无法解析)", remote: true };
+  const remote = !/^(localhost|127\.0\.0\.1|::1)$/i.test(match[1]);
+  return { database: match[2], host: match[1], remote };
 }
 
 function bool(value: unknown, fallback = false): boolean {
@@ -104,6 +119,7 @@ function taskRow(row: any): Json {
     runError: row.error_message,
     windowSince: iso(window.start),
     windowUntil: iso(window.end),
+    yesterday: null,
   };
 }
 
@@ -179,6 +195,7 @@ type CoverageLike = {
   newAccounts?: number;
   running?: number;
   contentCount?: number;
+  yesterday?: Json | null;
 };
 
 /**
@@ -221,6 +238,7 @@ function applyCoverage(task: Json, coverage: CoverageLike): Json {
   // the detail page shows come from every run, so the list has to use that
   // same count instead of the stale first-run value.
   if (coverage.contentCount != null) task.contentMetricCount = Number(coverage.contentCount);
+  task.yesterday = coverage.yesterday ?? null;
   const resolved = resolveTaskStatus(task, coverage);
   task.status = resolved.status;
   task.runStatus = resolved.runStatus;
@@ -441,13 +459,13 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   );
   const pendingRows = await Promise.all(pendingResult.rows.map(async (row: any) => {
     const task = taskRow(row);
-    const { coverage } = await loadTaskCoverage(pool, row);
-    return applyCoverage(task, coverage);
+    const { coverage, yesterday } = await loadTaskCoverage(pool, row);
+    return applyCoverage(task, { ...coverage, yesterday });
   }));
   const executedRows = await Promise.all(executedResult.rows.map(async (row: any) => {
     const task = taskRow(row);
-    const { coverage } = await loadTaskCoverage(pool, row);
-    return applyCoverage(task, coverage);
+    const { coverage, yesterday } = await loadTaskCoverage(pool, row);
+    return applyCoverage(task, { ...coverage, yesterday });
   }));
   const pending = pendingRows;
   const executed = executedRows;
@@ -465,6 +483,71 @@ async function listTasks(pool: any, date: string): Promise<Json> {
   return { date, summary, pending, executed };
 }
 
+
+/** Business day key (YYYYMMDD) of the day a task was planned for. */
+function taskDayKey(task: any): number | null {
+  const fromRun = Number(task.task_date_key);
+  if (Number.isInteger(fromRun) && fromRun >= 19000101 && fromRun <= 29991231) return fromRun;
+  const scheduled = Number(task.scheduled_at_ms);
+  if (Number.isFinite(scheduled) && scheduled > 0) return dayKeyInTimeZone(scheduled, TIME_ZONE);
+  return null;
+}
+
+/**
+ * Move a YYYYMMDD day key by whole days. UTC arithmetic keeps this immune to
+ * daylight-saving jumps in the business time zone.
+ */
+function shiftDayKey(dayKey: number, days: number): number {
+  const text = String(dayKey).padStart(8, "0");
+  const shifted = new Date(Date.UTC(Number(text.slice(0, 4)), Number(text.slice(4, 6)) - 1, Number(text.slice(6, 8)) + days));
+  return shifted.getUTCFullYear() * 10000 + (shifted.getUTCMonth() + 1) * 100 + shifted.getUTCDate();
+}
+
+function dayKeyText(dayKey: number): string {
+  const text = String(dayKey).padStart(8, "0");
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+}
+
+/**
+ * Yesterday's account rows, one per account. Retries write one metric row per
+ * run, so take the latest successful account run: that is the same rule the
+ * current-day numbers use, which keeps the two sides directly comparable.
+ */
+async function loadYesterdayMetrics(
+  pool: any,
+  accountIds: string[],
+  yesterdayKey: number,
+): Promise<Map<string, any>> {
+  const byAccount = new Map<string, any>();
+  if (!accountIds.length) return byAccount;
+  const result = await pool.query(
+    `select distinct on (am.account_id)
+            am.account_id, am.content_count_in_window,
+            am.followers_count, am.posts_count,
+            r.started_ts_ms
+       from account_daily_metrics am
+       join scrape_run_accounts ra
+         on ra.run_id = am.run_id and ra.account_id = am.account_id
+       join scrape_runs r on r.id = am.run_id
+      where am.account_id = any($1::text[])
+        and am.metric_day_key = $2
+        and ra.status = 'success'
+      order by am.account_id, r.started_ts_ms desc nulls last, am.captured_ts_ms desc`,
+    [accountIds, yesterdayKey],
+  );
+  for (const row of result.rows) byAccount.set(row.account_id, row);
+  return byAccount;
+}
+
+function yesterdayMetricDto(row: any, date: string): Json {
+  return {
+    date,
+    runStartedAt: iso(row.started_ts_ms),
+    followersCount: row.followers_count == null ? null : Number(row.followers_count),
+    postsCount: row.posts_count == null ? null : Number(row.posts_count),
+    contentCountInWindow: row.content_count_in_window == null ? null : Number(row.content_count_in_window),
+  };
+}
 
 async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
   const params = task.params || {};
@@ -552,10 +635,20 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     byAccount.set(row.account_id, list);
   }
 
+  // The day before this task's business day is the comparison baseline. Pending
+  // tasks have no run yet, so they skip the extra query and show no comparison.
+  const dayKey = taskDayKey(task);
+  const yesterdayKey = dayKey && task.run_id ? shiftDayKey(dayKey, -1) : null;
+  const yesterdayDate = yesterdayKey ? dayKeyText(yesterdayKey) : null;
+  const yesterdayByAccount = yesterdayKey
+    ? await loadYesterdayMetrics(pool, accountsResult.rows.map((account: any) => account.id), yesterdayKey)
+    : new Map<string, any>();
+
   const accounts = accountsResult.rows.map((account: any) => {
     const history = byAccount.get(account.id) || [];
     const latest = history.length ? history[history.length - 1] : null;
     const latestSuccess = [...history].reverse().find((row) => row.status === "success") || null;
+    const yesterdayRow = yesterdayByAccount.get(account.id);
     let status = "pending";
     if (!account.active) status = "disabled";
     else if (!latest) status = "pending";
@@ -592,6 +685,7 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
       newContentCount: latestSuccess?.new_content_count == null ? null : Number(latestSuccess.new_content_count),
       errorCode: status === "failed" || status === "partial" ? latest?.error_code || null : null,
       errorMessage: status === "failed" || status === "partial" ? latest?.error_message || null : null,
+      yesterday: yesterdayRow ? yesterdayMetricDto(yesterdayRow, yesterdayDate as string) : null,
     };
   });
 
@@ -605,6 +699,21 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     zeroContent: active.filter((account: any) => account.status === "success" && Number(account.contentCountInWindow || 0) === 0).length,
     disabled: accounts.length - active.length,
   };
+
+  // Yesterday is aggregated over today's account scope, so "5/5 today vs 4/5
+  // yesterday" reads as the same set of accounts on two days.
+  const activeWithYesterday = active.filter((account: any) => account.yesterday);
+  const yesterday = yesterdayKey
+    ? {
+        date: yesterdayDate,
+        total: active.length,
+        accountsWithData: activeWithYesterday.length,
+        contentCount: activeWithYesterday.reduce(
+          (sum: number, account: any) => sum + Number(account.yesterday.contentCountInWindow || 0),
+          0,
+        ),
+      }
+    : null;
 
   const authoritativeRuns = new Map<string, string>();
   for (const account of accounts) {
@@ -672,6 +781,7 @@ async function loadTaskCoverage(pool: any, task: any): Promise<Json> {
     contents,
     coverage: { ...coverage, contentCount: contents.length },
     childTasks,
+    yesterday,
   };
 }
 
@@ -680,7 +790,7 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
   if (!taskResult.rows.length) return null;
   const rawTask = taskResult.rows[0];
   const coverageData = await loadTaskCoverage(pool, rawTask);
-  const task = applyCoverage(taskRow(rawTask), coverageData.coverage);
+  const task = applyCoverage(taskRow(rawTask), { ...coverageData.coverage, yesterday: coverageData.yesterday });
 
   let run: Json | null = null;
   if (task.runId) {
@@ -726,6 +836,7 @@ async function taskDetail(pool: any, id: string): Promise<Json | null> {
     contents: coverageData.contents,
     coverage: coverageData.coverage,
     childTasks: coverageData.childTasks,
+    yesterday: coverageData.yesterday,
   };
 }
 
@@ -786,6 +897,315 @@ async function listAccounts(pool: any, url: URL): Promise<Json> {
     inactiveCount: total - activeCount,
     page,
     pageSize,
+  };
+}
+
+
+/** 账号详情页用：账号本身 + 最近一次账号指标。 */
+function accountMetrics(row: any): Json | null {
+  if (row.metrics_captured_ts_ms == null) return null;
+  return {
+    followersCount: row.followers_count == null ? null : Number(row.followers_count),
+    followingCount: row.following_count == null ? null : Number(row.following_count),
+    postsCount: row.posts_count == null ? null : Number(row.posts_count),
+    capturedAt: iso(row.metrics_captured_ts_ms),
+  };
+}
+
+async function findAccountDetail(pool: any, accountId: string): Promise<Json | null> {
+  const result = await pool.query(
+    `select a.id, a.platform_id, p.code as platform_code, p.name as platform_name,
+            a.handle, a.display_name, a.profile_url, a.external_account_id,
+            a.active, a.account_type, a.created_ts_ms, a.updated_ts_ms,
+            ${accountTypesSelect},
+            am.followers_count, am.following_count, am.posts_count,
+            am.captured_ts_ms as metrics_captured_ts_ms
+       from social_accounts a
+       join platforms p on p.id = a.platform_id
+       left join lateral (
+         select followers_count, following_count, posts_count, captured_ts_ms
+           from account_daily_metrics
+          where account_id = a.id
+          order by captured_ts_ms desc
+          limit 1
+       ) am on true
+      where a.id = $1`,
+    [accountId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { ...accountDto(row), metrics: accountMetrics(row) };
+}
+
+function isDateKeyText(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/** 帖子列表/评论导出的时间范围；空表示不限。 */
+function parseAccountRange(url: URL): {
+  sinceText: string | null;
+  untilText: string | null;
+  sinceTsMs: number | null;
+  untilTsMs: number | null;
+} {
+  const since = text(url.searchParams.get("since"));
+  const until = text(url.searchParams.get("until"));
+  if (since && !isDateKeyText(since)) throw new Error("since 必须是有效的 YYYY-MM-DD 日期");
+  if (until && !isDateKeyText(until)) throw new Error("until 必须是有效的 YYYY-MM-DD 日期");
+  if (since && until && since > until) throw new Error("since 不能晚于 until");
+  return {
+    sinceText: since || null,
+    untilText: until || null,
+    sinceTsMs: since ? scrapeWindowStartTsMs(since, TIME_ZONE) : null,
+    untilTsMs: until ? endOfDayInTimeZone(Number(until.replace(/-/g, "")), TIME_ZONE) : null,
+  };
+}
+
+const latestContentCommentJoin = `
+  left join lateral (
+    select comment_count
+      from content_daily_metrics
+     where content_id = c.id
+       and comment_count is not null
+     order by captured_ts_ms desc
+     limit 1
+  ) m on true`;
+
+const contentCommentAggregateJoin = `
+  left join lateral (
+    select count(*)::int as comment_count,
+           count(*) filter (where parent_comment_id is null)::int as top_level_count,
+           count(*) filter (where parent_comment_id is not null)::int as reply_count,
+           max(last_seen_ts_ms) as last_seen_ts_ms
+      from comment
+     where content_id = c.id
+  ) cc on true`;
+
+const contentRangeCondition = `
+  c.account_id = $1
+  and ($2::bigint is null or (c.publish_ts_ms is not null and c.publish_ts_ms >= $2))
+  and ($3::bigint is null or (c.publish_ts_ms is not null and c.publish_ts_ms <= $3))`;
+
+function postDto(row: any): Json {
+  return {
+    id: row.id,
+    externalContentId: row.external_content_id ?? null,
+    url: row.url,
+    contentType: row.content_type ?? null,
+    title: row.title ?? null,
+    summary: row.content_summary ?? null,
+    publishTime: iso(row.publish_ts_ms),
+    platformCommentCount: row.platform_comment_count == null ? null : Number(row.platform_comment_count),
+    fetchedCommentCount: Number(row.fetched_comment_count || 0),
+    topLevelCommentCount: Number(row.top_level_comment_count || 0),
+    replyCommentCount: Number(row.reply_comment_count || 0),
+    lastCommentSeenAt: iso(row.last_comment_seen_ts_ms),
+  };
+}
+
+function commentExportDto(row: any): Json {
+  return {
+    id: row.id,
+    username: row.username || "",
+    userId: row.user_id || "",
+    text: row.text_content || "",
+    likeCount: row.like_count == null ? null : Number(row.like_count),
+    replyCount: row.reply_count == null ? null : Number(row.reply_count),
+    parentCommentId: row.parent_comment_id ?? null,
+    rootCommentId: row.root_comment_id ?? null,
+    createdAt: iso(row.create_timestamp),
+    runId: row.run_id ?? null,
+    postId: row.content_id,
+    postUrl: row.post_url,
+    postTitle: row.post_title ?? null,
+    postPublishTime: iso(row.post_publish_ts_ms),
+  };
+}
+
+function postCommentDto(row: any): Json {
+  return {
+    id: row.id,
+    username: row.username || "",
+    userId: row.user_id || "",
+    text: row.text_content || "",
+    likeCount: row.like_count == null ? null : Number(row.like_count),
+    replyCount: row.reply_count == null ? null : Number(row.reply_count),
+    parentCommentId: row.parent_comment_id ?? null,
+    rootCommentId: row.root_comment_id ?? null,
+    createdAt: iso(row.create_timestamp),
+    runId: row.run_id ?? null,
+    lastSeenAt: iso(row.last_seen_ts_ms),
+  };
+}
+
+/**
+ * 账号帖子列表：帖子按发布时间倒序，评论数区分「平台指标」和「已抓评论」。
+ * 时间范围只作用于帖子发布时间，不作用于评论。
+ */
+async function listAccountPosts(pool: any, accountId: string, url: URL): Promise<Json | null> {
+  const account = await findAccountDetail(pool, accountId);
+  if (!account) return null;
+
+  const range = parseAccountRange(url);
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("pageSize") || "50", 10) || 50));
+  const params = [accountId, range.sinceTsMs, range.untilTsMs];
+
+  const summaryResult = await pool.query(
+    `select count(*)::int as post_count,
+            count(*) filter (where coalesce(cc.comment_count, 0) > 0)::int as posts_with_comments,
+            coalesce(sum(cc.comment_count), 0)::bigint as fetched_comments,
+            coalesce(sum(cc.top_level_count), 0)::bigint as top_level_comments,
+            coalesce(sum(cc.reply_count), 0)::bigint as reply_comments,
+            coalesce(sum(m.comment_count), 0)::bigint as platform_comments
+       from social_contents c
+       ${contentCommentAggregateJoin}
+       ${latestContentCommentJoin}
+      where ${contentRangeCondition}`,
+    params,
+  );
+  const summaryRow = summaryResult.rows[0] || {};
+
+  const result = await pool.query(
+    `select c.id, c.external_content_id, c.url, c.content_type, c.title, c.content_summary,
+            c.publish_ts_ms,
+            m.comment_count as platform_comment_count,
+            coalesce(cc.comment_count, 0)::int as fetched_comment_count,
+            coalesce(cc.top_level_count, 0)::int as top_level_comment_count,
+            coalesce(cc.reply_count, 0)::int as reply_comment_count,
+            cc.last_seen_ts_ms as last_comment_seen_ts_ms
+       from social_contents c
+       ${contentCommentAggregateJoin}
+       ${latestContentCommentJoin}
+      where ${contentRangeCondition}
+      order by c.publish_ts_ms desc nulls last, c.id desc
+      limit $4 offset $5`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
+
+  return {
+    account,
+    window: { since: range.sinceText, until: range.untilText },
+    posts: result.rows.map(postDto),
+    total: Number(summaryRow.post_count || 0),
+    page,
+    pageSize,
+    summary: {
+      posts: Number(summaryRow.post_count || 0),
+      postsWithComments: Number(summaryRow.posts_with_comments || 0),
+      fetchedComments: Number(summaryRow.fetched_comments || 0),
+      topLevelComments: Number(summaryRow.top_level_comments || 0),
+      replyComments: Number(summaryRow.reply_comments || 0),
+      platformComments: Number(summaryRow.platform_comments || 0),
+    },
+  };
+}
+
+/** 账号范围内所有帖子的评论（Excel 导出用），评论本身不按时间过滤。 */
+async function listAccountComments(pool: any, accountId: string, url: URL): Promise<Json | null> {
+  const account = await findAccountDetail(pool, accountId);
+  if (!account) return null;
+
+  const range = parseAccountRange(url);
+  const requested = Number.parseInt(url.searchParams.get("limit") || "50000", 10) || 50000;
+  const limit = Math.min(200000, Math.max(1, requested));
+  const params = [accountId, range.sinceTsMs, range.untilTsMs];
+
+  const totalResult = await pool.query(
+    `select count(*)::int as total
+       from comment cm
+       join social_contents c on c.id = cm.content_id
+      where ${contentRangeCondition}`,
+    params,
+  );
+  const total = Number(totalResult.rows[0]?.total || 0);
+
+  const result = await pool.query(
+    `select cm.id, cm.username, cm.user_id, cm.text_content,
+            cm.like_count, cm.reply_count,
+            cm.parent_comment_id, cm.root_comment_id, cm.create_timestamp, cm.run_id,
+            c.id as content_id, c.url as post_url, c.title as post_title,
+            c.publish_ts_ms as post_publish_ts_ms
+       from comment cm
+       join social_contents c on c.id = cm.content_id
+      where ${contentRangeCondition}
+      order by c.publish_ts_ms desc nulls last,
+               coalesce(cm.root_comment_id, cm.id),
+               cm.parent_comment_id nulls first,
+               cm.create_timestamp asc nulls last
+      limit $4`,
+    [...params, limit],
+  );
+
+  return {
+    account,
+    window: { since: range.sinceText, until: range.untilText },
+    comments: result.rows.map(commentExportDto),
+    total,
+    truncated: total > result.rows.length,
+  };
+}
+
+/** 单个帖子 + 所有评论（不按评论时间过滤）。 */
+async function getPostDetail(pool: any, contentId: string): Promise<Json | null> {
+  const postResult = await pool.query(
+    `select c.id, c.external_content_id, c.url, c.content_type, c.title, c.content_summary,
+            c.publish_ts_ms,
+            c.account_id, a.handle, a.display_name, a.profile_url, a.active as account_active,
+            p.id as platform_id, p.code as platform_code, p.name as platform_name,
+            m.comment_count as platform_comment_count,
+            coalesce(cc.comment_count, 0)::int as fetched_comment_count,
+            coalesce(cc.top_level_count, 0)::int as top_level_comment_count,
+            coalesce(cc.reply_count, 0)::int as reply_comment_count,
+            cc.last_seen_ts_ms as last_comment_seen_ts_ms
+       from social_contents c
+       join social_accounts a on a.id = c.account_id
+       join platforms p on p.id = a.platform_id
+       ${contentCommentAggregateJoin}
+       ${latestContentCommentJoin}
+      where c.id = $1`,
+    [contentId],
+  );
+  const row = postResult.rows[0];
+  if (!row) return null;
+
+  const commentsResult = await pool.query(
+    `select id, username, user_id, text_content, like_count, reply_count,
+            parent_comment_id, root_comment_id, create_timestamp, run_id, last_seen_ts_ms
+       from comment
+      where content_id = $1
+      order by parent_comment_id nulls first, create_timestamp asc nulls last, id`,
+    [contentId],
+  );
+  const comments = commentsResult.rows.map(postCommentDto);
+  const topLevel = comments.filter((comment: Json) => comment.parentCommentId == null).length;
+
+  return {
+    post: {
+      ...postDto(row),
+      platformId: row.platform_id,
+      platformCode: row.platform_code,
+      platformName: row.platform_name,
+      account: {
+        id: row.account_id,
+        handle: row.handle,
+        displayName: row.display_name ?? null,
+        profileUrl: row.profile_url,
+        active: row.account_active,
+        platformCode: row.platform_code,
+        platformName: row.platform_name,
+      },
+    },
+    comments,
+    counts: {
+      total: comments.length,
+      topLevel,
+      replies: comments.length - topLevel,
+      platform: row.platform_comment_count == null ? null : Number(row.platform_comment_count),
+    },
   };
 }
 
@@ -1173,6 +1593,26 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     if (method === "GET" && path === "/api/accounts") {
       return json(200, await listAccounts(handle.pool, url));
     }
+    const accountDetailMatch = path.match(/^\/api\/accounts\/([^/]+)$/);
+    if (method === "GET" && accountDetailMatch) {
+      const account = await findAccountDetail(handle.pool, decodeURIComponent(accountDetailMatch[1]));
+      return account ? json(200, { account }) : fail(404, "账号不存在");
+    }
+    const accountPostsMatch = path.match(/^\/api\/accounts\/([^/]+)\/posts$/);
+    if (method === "GET" && accountPostsMatch) {
+      const result = await listAccountPosts(handle.pool, decodeURIComponent(accountPostsMatch[1]), url);
+      return result ? json(200, result) : fail(404, "账号不存在");
+    }
+    const accountCommentsMatch = path.match(/^\/api\/accounts\/([^/]+)\/comments$/);
+    if (method === "GET" && accountCommentsMatch) {
+      const result = await listAccountComments(handle.pool, decodeURIComponent(accountCommentsMatch[1]), url);
+      return result ? json(200, result) : fail(404, "账号不存在");
+    }
+    const postDetailMatch = path.match(/^\/api\/posts\/([^/]+)$/);
+    if (method === "GET" && postDetailMatch) {
+      const result = await getPostDetail(handle.pool, decodeURIComponent(postDetailMatch[1]));
+      return result ? json(200, result) : fail(404, "帖子不存在");
+    }
     if (method === "GET" && path === "/api/platforms") {
       return json(200, { platforms: await listPlatforms(handle.pool) });
     }
@@ -1182,6 +1622,43 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         listAccountTypePlatformCounts(handle.pool),
       ]);
       return json(200, { accountTypes, platformCounts });
+    }
+    if (method === "POST" && path === "/api/comment-jobs") {
+      const body = await readJson(request);
+      const job = await createCommentJob(handle, {
+        accountIds: Array.isArray(body.accountIds) ? body.accountIds.map((id: unknown) => String(id)) : [],
+        since: text(body.since),
+        until: text(body.until),
+        includeReplies: body.includeReplies !== false,
+        maxCommentsPerPost: body.maxCommentsPerPost,
+        maxRepliesPerComment: body.maxRepliesPerComment,
+        maxPostsPerAccount: body.maxPostsPerAccount,
+        includeZeroComments: Boolean(body.includeZeroComments),
+      });
+      return json(201, { job });
+    }
+    if (method === "GET" && path === "/api/comment-jobs") {
+      const limit = Number.parseInt(url.searchParams.get("limit") || "20", 10) || 20;
+      return json(200, {
+        jobs: await listCommentJobs(handle, limit),
+        tikHubConfigured: Boolean(process.env.TIKHUB_API_KEY),
+        database: databaseTarget(),
+      });
+    }
+    const commentJobFailedMatch = path.match(/^\/api\/comment-jobs\/([^/]+)\/failed-posts$/);
+    if (method === "GET" && commentJobFailedMatch) {
+      const posts = await listFailedCommentPosts(handle, decodeURIComponent(commentJobFailedMatch[1]));
+      return json(200, { posts });
+    }
+    const commentJobRetryMatch = path.match(/^\/api\/comment-jobs\/([^/]+)\/retry-failed$/);
+    if (method === "POST" && commentJobRetryMatch) {
+      const job = await retryFailedCommentJob(handle, decodeURIComponent(commentJobRetryMatch[1]));
+      return json(201, { job });
+    }
+    const commentJobMatch = path.match(/^\/api\/comment-jobs\/([^/]+)$/);
+    if (method === "GET" && commentJobMatch) {
+      const job = await getCommentJob(handle, decodeURIComponent(commentJobMatch[1]));
+      return job ? json(200, { job }) : fail(404, "评论任务不存在");
     }
     if (method === "POST" && path === "/api/tasks") {
       const body = await readJson(request);

@@ -123,6 +123,8 @@ chmod 600 apps/web/.env apps/crawler/.env
 DATABASE_URL=postgres://user:password@rds-host:5432/changan_social_data
 DB_POOL_MAX=10
 SCRAPE_TIMEZONE=Asia/Shanghai
+# 启用 Web 手动评论抓取时还需要（见 9.2）
+TIKHUB_API_KEY=
 ```
 
 `apps/crawler/.env` 还要补浏览器相关变量，见第 9 节。
@@ -320,6 +322,155 @@ worker 用 `node --experimental-strip-types` 直接跑 TS，不需要构建，�
      --interpreter node --node-args="--experimental-strip-types"
    pm2 logs changan-worker --lines 100
    ```
+
+## 9.1 评论任务（TikHub 接口，可选）
+
+> 本地手动跑法见 [apps/crawler/COMMENTS.md](apps/crawler/COMMENTS.md)；下面只讲服务器上的每月自动跑。
+> 如果只想在 Web 页面手动触发，见 9.2（不需要额外 worker）。
+
+评论任务和上面的帖子 worker 是两条独立链路：
+
+- **只走 TikHub HTTP 接口，不启动浏览器**，所以服务器上不需要 Xvfb / Chrome，
+  也不会和帖子 worker 抢 Chrome profile，两个可以同时跑。
+- 支持 `instagram / tiktok / youtube / x`；Facebook / LinkedIn 没有评论接口，本任务不抓。
+- 帖子和 worker 一样直接跑 TS，需要服务器上有仓库代码和 `node_modules`（即第 10 节的方式 A）。
+- 帖子从库里已有的 `social_contents` 读取（帖子仍由每日任务负责），只补评论。
+- 说明：评论任务按「帖子发布时间落在窗口内」取帖，不是按评论时间过滤。
+- 已知限制：X 的接口返回扁平 `thread`，不提供父评论信息，所以 X 的 `parent_comment_id`/`root_comment_id`
+  为空（回复内容仍会入库），`--no-replies` 对 X 也不生效（thread 里的内容都按一级评论入库）；
+  YouTube 接口只给「x天前」这类相对时间，`create_timestamp` 存 0。
+
+1. **先补数据库结构**（只加可空列和索引，可重复执行）：
+
+   ```bash
+   cd /srv/changan
+   psql "$DATABASE_URL" -f apps/crawler/db/comment-upgrade.sql
+   # 或者跑包含第 4 节的完整升级脚本
+   psql "$DATABASE_URL" -f apps/crawler/db/prod-upgrade.sql
+   ```
+
+2. **配置 API Key**：`apps/crawler/.env` 里填 `TIKHUB_API_KEY`（按接口调用计费）。
+   可选 `TIKHUB_MIN_INTERVAL_MS`（默认 120）控制请求间隔。
+
+3. **先 dry-run 看范围**（不调接口、不写评论）：
+
+   ```bash
+   cd /srv/changan/apps/crawler
+   node --experimental-strip-types src/main/comment-run.ts \
+     --dry-run --last-month --account-type 总部
+   ```
+
+   输出会列出每个平台的账号数、窗口内帖子数、窗口内 0 帖子的账号。
+   0 帖子多说明该账号类型在对应月份没有入库帖子（先跑/post 检查每日任务），
+   不是评论任务失败。
+
+4. **配置每月 cron**：用 `deploy/comment-run.sh` 包装脚本，默认跑上月。
+
+   ```bash
+   mkdir -p /srv/changan/logs
+   crontab -e
+   ```
+
+   ```cron
+   # 每月 1 号 04:00 跑上月评论；NODE_BIN 用 `which node` 的绝对路径
+   0 4 1 * * COMMENT_ACCOUNT_TYPE=总部 NODE_BIN=/home/deploy/.nvm/versions/node/v24.19.0/bin/node /srv/changan/deploy/comment-run.sh >> /srv/changan/logs/comment.log 2>&1
+   ```
+
+   先手动触发一次再等 cron：
+
+   ```bash
+   COMMENT_ACCOUNT_TYPE=总部 /srv/changan/deploy/comment-run.sh
+   tail -50 /srv/changan/logs/comment.log
+   ```
+
+   按生产 10 月的量级（4 个平台约 2100 个帖子）估算，完整月跑通常几十分钟到数小时，
+   放凌晨 04:00 不会压到白天；默认开启回复抓取，可用 `--no-replies` 先跑一轮再补。
+
+   备选（不用 crontab，交给 pm2 的 cron_restart；同样不需要浏览器）：
+
+   ```bash
+   cd /srv/changan/apps/crawler
+   pm2 start src/main/comment-run.ts --name changan-comment \
+     --interpreter node --node-args="--experimental-strip-types" \
+     --cron-restart "0 4 1 * *" --no-autorestart -- \
+     --last-month --trigger scheduled --account-type 总部 \
+     --platforms instagram,tiktok,youtube,x
+   ```
+
+5. **手动补跑 / 控制成本**：
+
+   ```bash
+   cd /srv/changan/apps/crawler
+
+   # 单账号、指定范围
+   node --experimental-strip-types src/main/comment-run.ts \
+     --platforms instagram --account byd.uk --since 2026-09-01 --until 2026-09-30
+
+   # 失败后续跑（沿用原 run 的窗口，跳过已完成账号/帖子）
+   node --experimental-strip-types src/main/comment-run.ts \
+     --platforms instagram --run-id run-xxxx --account byd.uk
+
+   # 只补一级评论，不抓回复
+   node --experimental-strip-types src/main/comment-run.ts \
+     --last-month --account-type 总部 --no-replies
+
+   # 单帖上限：一级+回复合计 200 条、每条一级最多 20 条回复
+   node --experimental-strip-types src/main/comment-run.ts \
+     --last-month --account-type 总部 \
+     --max-comments-per-post 200 --max-replies-per-comment 20
+   ```
+
+6. **结果在哪看**：
+
+   - 评论：`comment` 表（`content_id` 关联 `social_contents.id`，`parent_comment_id`/`root_comment_id` 表示回复层级）。
+   - 每次运行：`scrape_runs`（一个平台一条 run）+ `scrape_run_accounts`（账号级状态）。
+   - 帖子级进度/断点：`scrape_raw_records`，`record_type = 'comment_post'`；成功行 `error_code is null`。
+   - 失败排查：`scrape_event_logs` 里的 `step = 'comment_error'` / 账号错误信息，
+     以及 `scrape_raw_records` 的 `error_message`。
+
+   评论任务不写 `content_daily_metrics`，避免影响每日指标；帖子评论数仍以每日任务为准。
+
+## 9.2 Web 手动触发评论抓取（可选）
+
+评论任务只走 TikHub 接口，所以也可以直接在 Web 进程里后台执行，不需要额外 worker，
+也不需要 Chrome / Xvfb。
+
+1. **数据库补一张任务表**：
+
+   ```bash
+   cd /srv/changan
+   psql "$DATABASE_URL" -f apps/crawler/db/comment-jobs-upgrade.sql
+   # 或者跑包含第 5 节的完整升级脚本
+   psql "$DATABASE_URL" -f apps/crawler/db/prod-upgrade.sql
+   ```
+
+2. **Web 进程配置 TikHub Key**：`TIKHUB_API_KEY` 要进 Web 的运行时环境
+   （`ecosystem.config.cjs` 的 `env` 或 `pm2 start/reload --update-env` 的 shell 环境）。
+   没有配置时页面会显示警告，任务无法创建。
+
+3. **重新发布 Web**（这次只改 Web，不需要动 crawler）：
+
+   ```bash
+   pnpm build:web
+   pm2 reload changan-web --update-env
+   ```
+
+4. 打开 `/comments`（部署在子路径时是 `/changan-data/comments`）：
+   - 选账号（支持平台/类型/搜索筛选，只支持 IG/TikTok/YouTube/X）
+   - 选**帖子发布时间范围**（评论本身不按时间筛选）
+   - 设置单帖评论/回复上限，点「开始抓取」
+   - 任务在 Web 进程内串行执行，页面每 3 秒刷新进度；可以离开页面
+   - 完成后去「账号管理 → 账号 → 帖子 → 查看评论」看结果，或下载 Excel
+   - 失败帖子可点「失败详情」；「重试失败」只重试可恢复错误（超时/限流等）。
+     资源不存在、无权限、评论关闭等会标为「不可重试」，不会再次请求，避免 TikHub 重复扣费
+   - Instagram 评论主用 v2；首屏 5xx、网络错误或 v2 的业务误报会自动切 v3 再取一次，
+     429/401/402/403 不切。v3 也失败才按错误分类记录
+
+5. 注意：
+   - 当前部署是**单个 Web 实例**：任务队列在进程内存里；Web 重启会把未完成任务标记为失败，
+     重新触发即可（评论按 ID upsert，不会重复）。
+   - 如果要跑几十个账号、积压很多任务，建议还是用 CLI + cron（9.1），或后续改成独立队列。
+   - `comment_jobs` 表只记录任务进度，评论数据仍写 `comment` 表。
 
 ## 10. 发布
 

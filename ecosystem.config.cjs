@@ -30,6 +30,8 @@ module.exports = {
           "postgres://ogilvy:1We^7Ma%tp@pgm-uf6bb4093trnp1hqbo.pg.rds.aliyuncs.com:5432/changan_social_data",
         DB_POOL_MAX: 10,
         SCRAPE_TIMEZONE: "Asia/Shanghai",
+        // 评论抓取页需要；也可以在 pm2 start 时用 shell 环境注入
+        TIKHUB_API_KEY: process.env.TIKHUB_API_KEY || "",
       },
     },
   ],

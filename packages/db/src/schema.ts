@@ -160,11 +160,53 @@ export const comments = pgTable("comment", {
   platform: varchar("platform", { length: 100 }),
   contentId: text("content_id"),
   createTimestamp: bigint("create_timestamp", { mode: "number" }).default(0),
+  /** 评论抓取任务新增列：账号/批次/点赞/回复关系，旧行为 null。 */
+  accountId: text("account_id"),
+  runId: text("run_id"),
+  likeCount: bigint("like_count", { mode: "number" }),
+  replyCount: bigint("reply_count", { mode: "number" }),
+  parentCommentId: text("parent_comment_id"),
+  rootCommentId: text("root_comment_id"),
+  firstSeenTsMs: bigint("first_seen_ts_ms", { mode: "number" }),
+  lastSeenTsMs: bigint("last_seen_ts_ms", { mode: "number" }),
 }, (table) => [
   index("idx_comment_user_id").on(table.userId),
   index("idx_comment_platform").on(table.platform),
   index("idx_comment_content_id").on(table.contentId),
   index("idx_comment_create_timestamp").on(table.createTimestamp),
+  index("idx_comment_account_id").on(table.accountId),
+  index("idx_comment_run_id").on(table.runId),
+  index("idx_comment_parent").on(table.parentCommentId),
+  index("idx_comment_root").on(table.rootCommentId),
+]);
+
+export const commentJobs = pgTable("comment_jobs", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull().default("pending"),
+  accountIds: jsonb("account_ids").notNull().default([]),
+  platformCodes: jsonb("platform_codes").notNull().default([]),
+  windowSinceTsMs: bigint("window_since_ts_ms", { mode: "number" }).notNull(),
+  windowUntilTsMs: bigint("window_until_ts_ms", { mode: "number" }).notNull(),
+  options: jsonb("options").notNull().default({}),
+  totalAccounts: integer("total_accounts").notNull().default(0),
+  processedAccounts: integer("processed_accounts").notNull().default(0),
+  successAccounts: integer("success_accounts").notNull().default(0),
+  failedAccounts: integer("failed_accounts").notNull().default(0),
+  totalPosts: integer("total_posts").notNull().default(0),
+  processedPosts: integer("processed_posts").notNull().default(0),
+  fetchedComments: integer("fetched_comments").notNull().default(0),
+  insertedComments: integer("inserted_comments").notNull().default(0),
+  updatedComments: integer("updated_comments").notNull().default(0),
+  failedPosts: integer("failed_posts").notNull().default(0),
+  runIds: jsonb("run_ids").notNull().default([]),
+  errorMessage: text("error_message"),
+  createdTsMs: bigint("created_ts_ms", { mode: "number" }).notNull(),
+  startedTsMs: bigint("started_ts_ms", { mode: "number" }),
+  finishedTsMs: bigint("finished_ts_ms", { mode: "number" }),
+  updatedTsMs: bigint("updated_ts_ms", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_comment_jobs_status").on(table.status, table.createdTsMs),
+  index("idx_comment_jobs_created").on(table.createdTsMs),
 ]);
 
 export const scrapeEventLogs = pgTable("scrape_event_logs", {

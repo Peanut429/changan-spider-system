@@ -11,8 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as AccountAccountIdRouteImport } from './routes/account.$accountId'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as PostContentIdRouteImport } from './routes/post.$contentId'
 import { Route as TasksIndexRouteImport } from './routes/tasks.index'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks.$taskId'
 
@@ -26,14 +29,29 @@ const AccountsRoute = AccountsRouteImport.update({
   path: '/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CommentsRoute = CommentsRouteImport.update({
+  id: '/comments',
+  path: '/comments',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountAccountIdRoute = AccountAccountIdRouteImport.update({
+  id: '/account/$accountId',
+  path: '/account/$accountId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostContentIdRoute = PostContentIdRouteImport.update({
+  id: '/post/$contentId',
+  path: '/post/$contentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TasksIndexRoute = TasksIndexRouteImport.update({
@@ -50,15 +68,21 @@ const TasksTaskIdRoute = TasksTaskIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/comments': typeof CommentsRoute
   '/tasks': typeof TasksRouteWithChildren
+  '/account/$accountId': typeof AccountAccountIdRoute
   '/api/$': typeof ApiSplatRoute
+  '/post/$contentId': typeof PostContentIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/tasks/': typeof TasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/comments': typeof CommentsRoute
+  '/account/$accountId': typeof AccountAccountIdRoute
   '/api/$': typeof ApiSplatRoute
+  '/post/$contentId': typeof PostContentIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/tasks': typeof TasksIndexRoute
 }
@@ -66,23 +90,45 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/comments': typeof CommentsRoute
   '/tasks': typeof TasksRouteWithChildren
+  '/account/$accountId': typeof AccountAccountIdRoute
   '/api/$': typeof ApiSplatRoute
+  '/post/$contentId': typeof PostContentIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/tasks/': typeof TasksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/accounts' | '/tasks' | '/api/$' | '/tasks/$taskId' | '/tasks/'
+    | '/'
+    | '/accounts'
+    | '/comments'
+    | '/tasks'
+    | '/account/$accountId'
+    | '/api/$'
+    | '/post/$contentId'
+    | '/tasks/$taskId'
+    | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/accounts' | '/api/$' | '/tasks/$taskId' | '/tasks'
+  to:
+    | '/'
+    | '/accounts'
+    | '/comments'
+    | '/account/$accountId'
+    | '/api/$'
+    | '/post/$contentId'
+    | '/tasks/$taskId'
+    | '/tasks'
   id:
     | '__root__'
     | '/'
     | '/accounts'
+    | '/comments'
     | '/tasks'
+    | '/account/$accountId'
     | '/api/$'
+    | '/post/$contentId'
     | '/tasks/$taskId'
     | '/tasks/'
   fileRoutesById: FileRoutesById
@@ -90,8 +136,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
+  CommentsRoute: typeof CommentsRoute
   TasksRoute: typeof TasksRouteWithChildren
+  AccountAccountIdRoute: typeof AccountAccountIdRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  PostContentIdRoute: typeof PostContentIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -110,6 +159,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/comments': {
+      id: '/comments'
+      path: '/comments'
+      fullPath: '/comments'
+      preLoaderRoute: typeof CommentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/tasks': {
       id: '/tasks'
       path: '/tasks'
@@ -117,11 +173,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account/$accountId': {
+      id: '/account/$accountId'
+      path: '/account/$accountId'
+      fullPath: '/account/$accountId'
+      preLoaderRoute: typeof AccountAccountIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
       fullPath: '/api/$'
       preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/post/$contentId': {
+      id: '/post/$contentId'
+      path: '/post/$contentId'
+      fullPath: '/post/$contentId'
+      preLoaderRoute: typeof PostContentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasks/': {
@@ -156,8 +226,11 @@ const TasksRouteWithChildren = TasksRoute._addFileChildren(TasksRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
+  CommentsRoute: CommentsRoute,
   TasksRoute: TasksRouteWithChildren,
+  AccountAccountIdRoute: AccountAccountIdRoute,
   ApiSplatRoute: ApiSplatRoute,
+  PostContentIdRoute: PostContentIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

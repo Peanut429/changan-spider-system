@@ -1,6 +1,6 @@
 # changan-rpa refactor
 
-`scrape:daily` 链路的迁移目标项目。当前阶段只做爬虫，不包含评论、任务队列、定时调度和页面。
+`scrape:daily` 链路的迁移目标项目。当前阶段只做爬虫（每日帖子 + 评论任务），不包含任务队列、定时调度和页面。
 
 ## 状态
 
@@ -15,6 +15,7 @@
 - [x] TikTok（真实账号验证通过）
 - [x] LinkedIn（RSC；真实账号验证通过）
 - [x] 六平台真实账号 + 旧/新 run 对比
+- [x] 评论任务（TikHub 接口；IG/TikTok/YouTube/X 真实接口验证通过，含二级回复）
 - [ ] 灰度切换 / 文档
 
 ## 安装
@@ -46,12 +47,25 @@ pnpm run test:all
 
 # 只跑 fake 平台，验证编排/入库/收口
 pnpm run scrape:daily -- --platforms fake --account-type 总部
+
+# 评论任务（只走 TikHub 接口，不启动浏览器）
+pnpm run comment:help
+pnpm run comment:run -- --dry-run --last-month --account-type 总部
+pnpm run comment:run -- --last-month --account-type 总部
+pnpm run comment:run -- --platforms instagram --account byd.uk --since 2026-09-01 --until 2026-09-30
+
+# 评论接口探针（接口字段变了时用来核对，只读不写库）
+node --experimental-strip-types scripts/probe-tikhub-comments.ts \
+  --platform instagram --post-url https://www.instagram.com/p/XXXX/
 ```
+
+账号类型名以库里 `account_categories` 为准；本机测试库当前是 `总部账号`。
+本地运行步骤见 [COMMENTS.md](./COMMENTS.md)；服务器每月 cron 见根目录 [DEPLOY.md](../../DEPLOY.md) 第 9.1 节。
 
 ## 约定
 
 - 新项目不写本地 Excel / raw.json / CSV。
-- 不改数据库表结构，不改 `task_date_key` 计算，不改平台选择器/解析逻辑。
+- 每日抓取链路不改数据库表结构，不改 `task_date_key` 计算，不改平台选择器/解析逻辑；评论任务只通过 `db/comment-upgrade.sql` 给 `comment` 表加可空列和索引。
 - 平台模块只操作浏览器和解析数据；DB 入库、run 状态、浏览器生命周期由 runner/main 负责。
 - run 最终状态由 daily 统一收口；平台脚本不再写 `scrape_runs.status`。
 - 平台级/账号级超时可在 daily 参数中配置；账号超时会终止整个平台，避免复用卡死的页面。

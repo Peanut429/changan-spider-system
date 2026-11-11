@@ -498,6 +498,59 @@
   white-space: nowrap;
 }
 
+/* ---------- day-over-day comparison ---------- */
+
+.cx-prev {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--cx-ink-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cx-prev-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cx-prev-row em {
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--cx-ink-3);
+}
+
+.cx-prev-empty {
+  color: var(--cx-ink-3);
+}
+
+.cx-delta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in oklab, currentColor 9%, transparent);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  color: var(--cx-ink-3);
+}
+
+.cx-delta[data-tone='down'] {
+  color: var(--cx-warn);
+}
+
+.cx-delta[data-tone='bad'] {
+  color: var(--cx-danger);
+}
+
 /* ---------- coverage array ---------- */
 
 .cx-cover {

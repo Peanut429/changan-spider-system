@@ -10,6 +10,8 @@
   "scripts": {
     "dev:web": "pnpm --filter @changan/web dev",
     "worker": "pnpm --filter @changan/crawler worker",
+    "comment:run": "pnpm --filter @changan/crawler comment:run",
+    "comment:help": "pnpm --filter @changan/crawler comment:help",
     "typecheck": "pnpm -r typecheck",
     "build:web": "pnpm --filter @changan/web build",
     "test": "pnpm --filter @changan/crawler test",

@@ -18,7 +18,9 @@
     "auth:seed": "node --experimental-strip-types scripts/seed-browser-auth.ts",
     "db:test:seed": "node --experimental-strip-types scripts/seed-test-db.ts",
     "auth:x-login": "node --experimental-strip-types scripts/x-login.ts",
-    "worker": "node --experimental-strip-types src/main/worker.ts"
+    "worker": "node --experimental-strip-types src/main/worker.ts",
+    "comment:run": "node --experimental-strip-types src/main/comment-run.ts",
+    "comment:help": "node --experimental-strip-types src/main/comment-run.ts --help"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

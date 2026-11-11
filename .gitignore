@@ -17,3 +17,7 @@ coverage
 .ui-review/
 
 .backfill/
+
+# 本机临时目录：一次性回填脚本、抓取进度 JSON、Playwright 登录态 profile
+# （work/playwright-social-profile 里是已登录社媒账号的 cookie，绝不能进库）
+work/

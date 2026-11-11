@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
-import { LayoutDashboard, UsersRound } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GooeyNav from '@/components/GooeyNav/GooeyNav'
 import { ConsoleBackdrop } from '@/components/console/console-backdrop'
@@ -10,6 +10,7 @@ import { useTheme } from '@/lib/theme'
 const NAV_ITEMS = [
   { to: '/tasks', label: '任务数据', icon: <LayoutDashboard className="size-3.5" strokeWidth={1.9} /> },
   { to: '/accounts', label: '账号管理', icon: <UsersRound className="size-3.5" strokeWidth={1.9} /> },
+  { to: '/comments', label: '评论抓取', icon: <MessageSquare className="size-3.5" strokeWidth={1.9} /> },
 ] as const
 
 function BrandMark() {
@@ -30,13 +31,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   })
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
-  const section = pathname.startsWith('/accounts') ? '/accounts' : '/tasks'
+  const inComments = pathname.startsWith('/comments')
+  const inAccounts = !inComments
+    && (pathname.startsWith('/accounts') || pathname.startsWith('/account/') || pathname.startsWith('/post/'))
+  const section = inComments ? '/comments' : inAccounts ? '/accounts' : '/tasks'
+  const activeIndex = section === '/accounts' ? 1 : section === '/comments' ? 2 : 0
   const openSection = (index: number) => {
-    const target = index === 1 ? '/accounts' : '/tasks'
-    const atSectionRoot = pathname === '/tasks' || pathname === '/tasks/' || pathname === '/accounts'
+    const target = index === 0 ? '/tasks' : index === 1 ? '/accounts' : '/comments'
+    const atSectionRoot = pathname === '/tasks' || pathname === '/tasks/'
+      || pathname === '/accounts' || pathname === '/comments'
     if (target === section && atSectionRoot) return
     if (target === '/tasks') navigate({ to: '/tasks', search: { date: searchDate ?? todayKey() } })
-    else navigate({ to: '/accounts' })
+    else if (target === '/accounts') navigate({ to: '/accounts' })
+    else navigate({ to: '/comments' })
   }
 
   return (
@@ -59,7 +66,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <nav className="min-w-0">
             <GooeyNav
               items={NAV_ITEMS.map((item) => ({ label: item.label, icon: item.icon }))}
-              activeIndex={section === '/accounts' ? 1 : 0}
+              activeIndex={activeIndex}
               onChange={openSection}
               size="sm"
               frame={false}

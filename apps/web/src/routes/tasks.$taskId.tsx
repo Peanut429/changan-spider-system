@@ -19,11 +19,12 @@ import { motion, useReducedMotion } from 'motion/react'
 import { getTask, rerunTask } from '@/lib/api'
 import { downloadTaskExcel } from '@/lib/export-task'
 import type { TaskAccount, TaskContent, TaskDetailResponse } from '@/lib/types'
-import { dateKeyFromDate, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
+import { dateKeyFromDate, formatClock, formatDateTime, formatFullDate, formatFullDateTime, formatNumber, formatWindow, todayKey } from '@/lib/format'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import '@/components/console/console.css'
+import { ChangeBadge } from '@/components/day-compare'
 import { PlatformMark } from '@/components/platform-mark'
 import { StatusBadge } from '@/components/status-badge'
 import { EmptyState } from '@/components/empty-state'
@@ -77,6 +78,37 @@ function CoverageStatus({ account }: { account: TaskAccount }) {
   )
 }
 
+/**
+ * The same account on the previous business day. Values are read from that
+ * day's latest successful run, so they line up with the current-day cells.
+ */
+function YesterdayAccountCell({ account }: { account: TaskAccount }) {
+  const yesterday = account.yesterday
+  if (!yesterday) {
+    return <span className="text-xs text-muted-foreground" title="昨天没有该账号的成功抓取数据">—</span>
+  }
+  return (
+    <div
+      className="flex flex-col items-end gap-0.5 text-[11px] leading-tight tabular-nums text-muted-foreground"
+      title={`昨日（${yesterday.date}）${yesterday.runStartedAt ? `${formatClock(yesterday.runStartedAt)} ` : ''}的抓取数据`}
+    >
+      <span className="inline-flex items-baseline gap-1.5">
+        <span className="text-[10px]">内容</span>
+        <span className="text-foreground/80">{formatNumber(yesterday.contentCountInWindow)}</span>
+        <ChangeBadge today={account.contentCountInWindow} yesterday={yesterday.contentCountInWindow} />
+      </span>
+      <span className="inline-flex items-baseline gap-1.5">
+        <span className="text-[10px]">粉丝</span>
+        <span className="text-foreground/80">{formatNumber(yesterday.followersCount)}</span>
+      </span>
+      <span className="inline-flex items-baseline gap-1.5">
+        <span className="text-[10px]">帖子</span>
+        <span className="text-foreground/80">{formatNumber(yesterday.postsCount)}</span>
+      </span>
+    </div>
+  )
+}
+
 type ConfirmAction = {
   mode: 'failed' | 'new' | 'selected'
   ids: string[]
@@ -84,7 +116,17 @@ type ConfirmAction = {
   description: string
 }
 
-function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[]; coverage: TaskDetailResponse['coverage']; taskId: string }) {
+function AccountTable({
+  accounts,
+  coverage,
+  taskId,
+  yesterday,
+}: {
+  accounts: TaskAccount[]
+  coverage: TaskDetailResponse['coverage']
+  taskId: string
+  yesterday: TaskDetailResponse['yesterday']
+}) {
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -176,6 +218,11 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               成功 {coverage.success} · 失败 {coverage.failed} · 运行中 {coverage.running} · 新增待补 {coverage.newAccounts} · 已禁用 {coverage.disabled}
             </p>
+            {yesterday ? (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                昨日 {yesterday.date.slice(5)} 覆盖 {yesterday.accountsWithData}/{yesterday.total} · 内容 {formatNumber(yesterday.contentCount)}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {failed.length > 0 ? <Button size="sm" variant="outline" onClick={() => ask('failed', failed.map((a) => a.accountId))}><RefreshCw className="size-3.5" />重试失败 {failed.length}</Button> : null}
@@ -214,7 +261,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
       ) : null}
 
       <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-[0_24px_60px_-52px_rgba(6,78,59,0.55)]">
-        <Table className="min-w-[1080px]">
+        <Table className="min-w-[1220px]">
           <TableHeader>
             <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
               <TableHead className="w-10">
@@ -229,6 +276,11 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
               <TableHead className="text-right">窗口内容</TableHead>
               <TableHead className="text-right">粉丝</TableHead>
               <TableHead className="text-right">帖子数</TableHead>
+              <TableHead className="text-right" title="同一账号在昨天的数据；百分比为今日较昨日的变化">
+                {yesterday
+                  ? <>昨日 <span className="text-[10px] font-normal text-muted-foreground">{yesterday.date.slice(5)}</span></>
+                  : '昨日'}
+              </TableHead>
               <TableHead>最近执行</TableHead>
               <TableHead>错误</TableHead>
               <TableHead className="text-right">操作</TableHead>
@@ -258,6 +310,7 @@ function AccountTable({ accounts, coverage, taskId }: { accounts: TaskAccount[];
                 <TableCell className="text-right tabular-nums">{formatNumber(account.contentCountInWindow)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(account.followersCount)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(account.postsCount)}</TableCell>
+                <TableCell className="text-right"><YesterdayAccountCell account={account} /></TableCell>
                 <TableCell className="text-xs tabular-nums text-muted-foreground">{formatFullDateTime(account.latestRunStartedAt)}</TableCell>
                 <TableCell>
                   {account.errorMessage ? (
@@ -437,7 +490,7 @@ function TaskDetailPage() {
     )
   }
 
-  const { task, run, accounts, contents, coverage, childTasks } = query.data
+  const { task, run, accounts, contents, coverage, childTasks, yesterday } = query.data
   // The list groups tasks by their planned day, so go back there rather than to
   // the day a late run happened to start.
   const backDate = task.scheduledAt
@@ -561,7 +614,7 @@ function TaskDetailPage() {
           />
         </div>
 
-        <TabsContent value="accounts"><AccountTable accounts={accounts} coverage={coverage} taskId={task.id} /></TabsContent>
+        <TabsContent value="accounts"><AccountTable accounts={accounts} coverage={coverage} taskId={task.id} yesterday={yesterday} /></TabsContent>
         <TabsContent value="contents"><ContentTable contents={contents} /></TabsContent>
         <TabsContent value="run">
           {run ? (

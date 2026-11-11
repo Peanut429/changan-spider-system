@@ -9,6 +9,12 @@ import type {
   Task,
   TaskDetailResponse,
   TaskListResponse,
+  AccountPostsResponse,
+  AccountCommentsResponse,
+  PostDetailResponse,
+  CommentJob,
+  CommentJobListResponse,
+  CreateCommentJobInput,
 } from './types'
 
 // 部署在子路径时（BASE_PATH=/changan-data），接口也要带前缀
@@ -158,6 +164,75 @@ export function resumeTask(id: string) {
 
 export function retryTask(id: string) {
   return request<{ task: unknown }>(`/api/tasks/${encodeURIComponent(id)}/retry`, {
+    method: 'POST',
+  })
+}
+
+export type AccountPostsFilters = {
+  since?: string
+  until?: string
+  page?: number
+  pageSize?: number
+}
+
+export function getAccountPosts(id: string, filters: AccountPostsFilters = {}) {
+  const params = new URLSearchParams()
+  if (filters.since) params.set('since', filters.since)
+  if (filters.until) params.set('until', filters.until)
+  if (filters.page) params.set('page', String(filters.page))
+  if (filters.pageSize) params.set('pageSize', String(filters.pageSize))
+  const query = params.toString()
+  return request<AccountPostsResponse>(
+    `/api/accounts/${encodeURIComponent(id)}/posts${query ? `?${query}` : ''}`,
+  )
+}
+
+export function getAccountComments(
+  id: string,
+  filters: { since?: string; until?: string } = {},
+) {
+  const params = new URLSearchParams()
+  if (filters.since) params.set('since', filters.since)
+  if (filters.until) params.set('until', filters.until)
+  const query = params.toString()
+  return request<AccountCommentsResponse>(
+    `/api/accounts/${encodeURIComponent(id)}/comments${query ? `?${query}` : ''}`,
+  )
+}
+
+export function getPostDetail(id: string) {
+  return request<PostDetailResponse>(
+    `/api/posts/${encodeURIComponent(id)}`,
+  )
+}
+
+export function getAccount(id: string) {
+  return request<{ account: Account }>(`/api/accounts/${encodeURIComponent(id)}`)
+}
+
+export function getCommentJobs(limit = 20) {
+  return request<CommentJobListResponse>(`/api/comment-jobs?limit=${limit}`)
+}
+
+export function getCommentJob(id: string) {
+  return request<{ job: CommentJob }>(`/api/comment-jobs/${encodeURIComponent(id)}`)
+}
+
+export function createCommentJob(input: CreateCommentJobInput) {
+  return request<{ job: CommentJob }>('/api/comment-jobs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function getCommentJobFailedPosts(id: string) {
+  return request<{ posts: import('./types').CommentJobFailedPost[] }>(
+    `/api/comment-jobs/${encodeURIComponent(id)}/failed-posts`,
+  )
+}
+
+export function retryCommentJob(id: string) {
+  return request<{ job: CommentJob }>(`/api/comment-jobs/${encodeURIComponent(id)}/retry-failed`, {
     method: 'POST',
   })
 }

@@ -17,6 +17,17 @@ export type TaskSummary = {
   contentsSuccess: number
 }
 
+export type TaskYesterday = {
+  /** Business day, YYYY-MM-DD in Asia/Shanghai. */
+  date: string
+  /** Accounts in today's scope; the denominator for accountsWithData. */
+  total: number
+  /** Accounts that produced a successful metric row yesterday. */
+  accountsWithData: number
+  /** Sum of yesterday's per-account window content counts. */
+  contentCount: number
+}
+
 export type Task = {
   id: string
   platformId: string
@@ -46,6 +57,7 @@ export type Task = {
   runError: string | null
   windowSince: string | null
   windowUntil: string | null
+  yesterday: TaskYesterday | null
 }
 
 export type TaskListResponse = {
@@ -77,6 +89,14 @@ export type Run = {
   errorMessage: string | null
 }
 
+export type AccountYesterday = {
+  date: string
+  runStartedAt: string | null
+  followersCount: number | null
+  postsCount: number | null
+  contentCountInWindow: number | null
+}
+
 export type TaskAccount = {
   id: string
   accountId: string
@@ -105,6 +125,8 @@ export type TaskAccount = {
   latestRunStartedAt: string | null
   latestSuccessRunId: string | null
   isNew: boolean
+  /** Same account on the previous business day; null when it has no successful run. */
+  yesterday: AccountYesterday | null
 }
 
 export type TaskContent = {
@@ -161,6 +183,7 @@ export type TaskDetailResponse = {
   contents: TaskContent[]
   coverage: TaskCoverage
   childTasks: TaskChildRun[]
+  yesterday: TaskYesterday | null
 }
 
 export type Account = {
@@ -216,4 +239,174 @@ export type AccountTypesResponse = {
   accountTypes: string[]
   /** 账号类型 → 平台 ID → 启用账号数，用于默认选中“有账号的平台” */
   platformCounts: Record<string, Record<string, number>>
+}
+
+export type AccountMetrics = {
+  followersCount: number | null
+  followingCount: number | null
+  postsCount: number | null
+  capturedAt: string | null
+}
+
+export type AccountDetail = Account & { metrics: AccountMetrics | null }
+
+export type AccountPost = {
+  id: string
+  externalContentId: string | null
+  url: string
+  contentType: string | null
+  title: string | null
+  summary: string | null
+  publishTime: string | null
+  /** 每日指标里的平台评论数；没有指标时为 null。 */
+  platformCommentCount: number | null
+  /** comment 表里实际抓到的评论数（一级 + 回复）。 */
+  fetchedCommentCount: number
+  topLevelCommentCount: number
+  replyCommentCount: number
+  lastCommentSeenAt: string | null
+}
+
+export type AccountPostSummary = {
+  posts: number
+  postsWithComments: number
+  fetchedComments: number
+  topLevelComments: number
+  replyComments: number
+  platformComments: number
+}
+
+export type AccountPostsResponse = {
+  account: AccountDetail
+  window: { since: string | null; until: string | null }
+  posts: AccountPost[]
+  total: number
+  page: number
+  pageSize: number
+  summary: AccountPostSummary
+}
+
+export type AccountCommentRow = {
+  id: string
+  username: string
+  userId: string
+  text: string
+  likeCount: number | null
+  replyCount: number | null
+  parentCommentId: string | null
+  rootCommentId: string | null
+  createdAt: string | null
+  runId: string | null
+  postId: string
+  postUrl: string
+  postTitle: string | null
+  postPublishTime: string | null
+}
+
+export type AccountCommentsResponse = {
+  account: AccountDetail
+  window: { since: string | null; until: string | null }
+  comments: AccountCommentRow[]
+  total: number
+  truncated: boolean
+}
+
+export type PostComment = {
+  id: string
+  username: string
+  userId: string
+  text: string
+  likeCount: number | null
+  replyCount: number | null
+  parentCommentId: string | null
+  rootCommentId: string | null
+  createdAt: string | null
+  runId: string | null
+  lastSeenAt: string | null
+}
+
+export type PostDetailPost = AccountPost & {
+  platformId: string
+  platformCode: string
+  platformName: string
+  account: {
+    id: string
+    handle: string
+    displayName: string | null
+    profileUrl: string
+    active: boolean
+    platformCode: string
+    platformName: string
+  }
+}
+
+export type PostDetailResponse = {
+  post: PostDetailPost
+  comments: PostComment[]
+  counts: { total: number; topLevel: number; replies: number; platform: number | null }
+}
+
+export type CommentJobOptions = {
+  includeReplies: boolean
+  maxCommentsPerPost: number
+  maxRepliesPerComment: number
+  maxPostsPerAccount: number
+  includeZeroComments: boolean
+  maxPagesPerPost?: number
+  maxReplyPagesPerComment?: number
+  contentIds?: string[]
+  retryOfJobId?: string
+}
+
+export type CommentJob = {
+  id: string
+  status: 'pending' | 'running' | 'success' | 'partial_failed' | 'failed' | 'cancelled' | string
+  accountIds: string[]
+  platformCodes: string[]
+  window: { since: string | null; until: string | null; sinceTsMs: number; untilTsMs: number }
+  options: CommentJobOptions
+  totalAccounts: number
+  processedAccounts: number
+  successAccounts: number
+  failedAccounts: number
+  totalPosts: number
+  processedPosts: number
+  fetchedComments: number
+  insertedComments: number
+  updatedComments: number
+  failedPosts: number
+  retryableFailedPosts: number
+  runIds: string[]
+  errorMessage: string | null
+  createdAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  updatedAt: string | null
+}
+
+export type CommentJobFailedPost = {
+  contentId: string
+  url: string
+  accountHandle: string
+  platformCode: string
+  errorMessage: string | null
+  retryable: boolean
+  attemptedAt: string | null
+}
+
+export type CommentJobListResponse = {
+  jobs: CommentJob[]
+  tikHubConfigured: boolean
+  database?: { database: string; host: string; remote: boolean }
+}
+
+export type CreateCommentJobInput = {
+  accountIds: string[]
+  since: string
+  until: string
+  includeReplies: boolean
+  maxCommentsPerPost: number
+  maxRepliesPerComment: number
+  maxPostsPerAccount?: number
+  includeZeroComments?: boolean
 }

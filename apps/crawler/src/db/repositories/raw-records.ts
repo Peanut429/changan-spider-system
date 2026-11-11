@@ -17,18 +17,21 @@ export async function insertRawRecord(
     url,
     rawJson,
     errorMessage,
+    errorCode,
     capturedTsMs,
   }: {
     runId: string;
     platformId: string;
     accountId?: string | null;
     contentId?: string | null;
-    recordType: "account" | "content" | "metric" | "error" | "page_state";
+    recordType: "account" | "content" | "metric" | "error" | "page_state" | "comment_post";
     source: string;
     externalId?: string | null;
     url?: string | null;
     rawJson: Record<string, any>;
     errorMessage?: string | null;
+    /** 需要区分具体错误码时显式传入（例如 TIKHUB_API_FAILED）；不传则按消息推断。 */
+    errorCode?: string | null;
     capturedTsMs: number;
   },
 ): Promise<string> {
@@ -44,7 +47,7 @@ export async function insertRawRecord(
     externalId: externalId || null,
     url: url || null,
     rawJson,
-    errorCode: errorCodeForMessage(errorMessage),
+    errorCode: errorCode === undefined ? errorCodeForMessage(errorMessage) : errorCode,
     errorMessage: errorMessage || null,
     capturedTsMs,
     createdTsMs: nowTsMs(),

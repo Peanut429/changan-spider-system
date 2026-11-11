@@ -15,6 +15,7 @@ import { AnimatedNumber } from '@/components/console/animated-number'
 import { ConsoleBar } from '@/components/console/console-bar'
 import { ConsolePage } from '@/components/console/console-page'
 import { ROW_IN, ROW_STAGGER } from '@/components/console/motion'
+import { ChangeBadge } from '@/components/day-compare'
 import RubberSegment from '@/components/RubberSegment/RubberSegment'
 import { PlatformMark } from '@/components/platform-mark'
 import { TaskDialog } from '@/components/task-dialog'
@@ -484,6 +485,38 @@ function PendingTable({
   )
 }
 
+/**
+ * Yesterday's numbers for the same platform + account type. The baseline is
+ * computed from the same account scope as today, so a drop means data went
+ * missing rather than accounts having been added or removed.
+ */
+function YesterdayCell({ task }: { task: Task }) {
+  const yesterday = task.yesterday
+  if (!yesterday || yesterday.accountsWithData === 0) {
+    return (
+      <span
+        className="cx-prev-empty"
+        title={yesterday ? `${yesterday.date} 没有这些账号的成功抓取数据` : '昨天没有可对比的数据'}
+      >
+        无数据
+      </span>
+    )
+  }
+  return (
+    <span className="cx-prev" title={`昨日（${yesterday.date}）同一平台、同一账号类型的账号数据`}>
+      <span className="cx-prev-row">
+        <em>账号</em>
+        <span>{yesterday.accountsWithData}/{yesterday.total}</span>
+      </span>
+      <span className="cx-prev-row">
+        <em>内容</em>
+        <span>{formatNumber(yesterday.contentCount)}</span>
+        <ChangeBadge today={task.contentMetricCount} yesterday={yesterday.contentCount} />
+      </span>
+    </span>
+  )
+}
+
 function ExecutedTable({
   groups,
   grouped,
@@ -506,6 +539,7 @@ function ExecutedTable({
           <th>周期（UTC+8）</th>
           <th className="cx-num">账号覆盖</th>
           <th className="cx-num">内容</th>
+          <th className="cx-num" title="同一平台、同一账号类型在昨天的数据；百分比为今日较昨日的变化（按任务的业务日计算）">昨日</th>
           <th data-hide-mobile="true">执行时段</th>
           <th className="cx-run-head">运行</th>
           <th className="cx-right">操作</th>
@@ -515,7 +549,7 @@ function ExecutedTable({
         {groups.map((group) => (
           <Fragment key={group.key}>
             {grouped ? (
-              <GroupHeaderRow group={group} groupBy={groupBy} colSpan={8} variant="executed" />
+              <GroupHeaderRow group={group} groupBy={groupBy} colSpan={9} variant="executed" />
             ) : null}
             {group.tasks.map((task, index) => (
               <motion.tr
@@ -538,6 +572,7 @@ function ExecutedTable({
                   />
                 </td>
                 <td data-label="内容" className="cx-num">{formatNumber(task.contentMetricCount)}</td>
+                <td data-label="昨日" className="cx-num"><YesterdayCell task={task} /></td>
                 <td data-label="执行时段" data-hide-mobile="true"><span className="cx-when">{taskRunClock(task)}</span></td>
                 <td data-label="运行"><RunCell task={task} /></td>
                 <td data-label="操作" className="cx-right">

@@ -3,6 +3,8 @@ import type { Database } from "../db/factory.ts";
 import { platforms, socialAccounts } from "../db/schema.ts";
 
 export type SourceAccount = {
+  /** social_accounts.id；评论任务需要按账号查帖子。 */
+  id?: string;
   account: string;
   link: string;
   /** 平台侧的真实 ID（TikTok 的 user_id 等），有就带上，省一次解析请求。 */
@@ -62,6 +64,7 @@ export async function loadPlatformAccounts({
   const filtered = rows
     .filter((row) => !neededIds || neededIds.has(row.id))
     .map((row) => ({
+      id: row.id,
       account: row.account,
       link: row.link,
       externalAccountId: row.externalAccountId || "",
