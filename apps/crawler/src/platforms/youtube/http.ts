@@ -5,7 +5,7 @@
 // 请求在页面里用 fetch 发出，沿用浏览器的代理、cookie 和登录态。
 // 任何引导/传输级失败都会抛出 YouTubeHttpError，由上层决定是否降级回纯页面抓取。
 import { gotoWithRetry, pageFetch } from "../../core/page-http.ts";
-import { approxRelativePublishedRange, parseLocalizedNumber } from "./parse.ts";
+import { approxRelativePublishedRange, parseLocalizedNumber, parseYouTubeDateText } from "./parse.ts";
 import { autoAcceptYouTubeConsent } from "./page.ts";
 
 export class YouTubeHttpError extends Error {
@@ -62,8 +62,11 @@ export type YouTubeHttpVideoDetail = {
   viewCountText: string;
   likeText: string;
   commentText: string;
+  /** 页面显示日期（next.dateText），唯一发布时间来源。 */
   publishDate: string;
+  /** 只用于诊断：player 里那两个时间字段的原始值。 */
   uploadDate: string;
+  publishDateRaw?: { publishDate: string; uploadDate: string; dateText: string };
   description: string;
   isLive: boolean | null;
 };
@@ -642,7 +645,14 @@ function detectCommentsDisabled(next: any): string {
   return result;
 }
 
-/** 从 player/next 响应里取视频指标。player 缺字段时尽量用 next 兜底。 */
+/**
+ * 从 player/next 响应里取视频指标。
+ *
+ * 发布时间只认 next 里 videoPrimaryInfoRenderer.dateText（就是页面上显示的 "2026/11/19"）：
+ * player.microformat.publishDate 在生产登录态下是间歇性缺失的（拿不到时整轮都得靠
+ * "1d ago" 反向倒推），不能作为唯一依据。dateText 拿不到就留空，由上层直接报错。
+ * 指标仍然允许多来源互补（player 缺了用 next）。
+ */
 export function parseYouTubeVideoDetail(player: any, next: any, videoId: string): YouTubeHttpVideoDetail {
   const details = player?.videoDetails || {};
   const micro = player?.microformat?.playerMicroformatRenderer || {};
@@ -650,6 +660,13 @@ export function parseYouTubeVideoDetail(player: any, next: any, videoId: string)
   const secondary = findSecondaryInfo(next);
   const viewCountText = textOf(primary?.viewCount?.videoViewCountRenderer?.viewCount);
   const localizedViews = parseLocalizedNumber(viewCountText);
+
+  const pageDateText = textOf(primary?.dateText);
+  const microDateRaw = {
+    publishDate: String(micro.publishDate || ""),
+    uploadDate: String(micro.uploadDate || ""),
+    dateText: pageDateText,
+  };
 
   const microLike = micro?.likeCount;
   let likeText = "";
@@ -670,8 +687,9 @@ export function parseYouTubeVideoDetail(player: any, next: any, videoId: string)
     viewCountText,
     likeText,
     commentText: "",
-    publishDate: String(micro.publishDate || ""),
-    uploadDate: String(micro.uploadDate || ""),
+    publishDate: parseYouTubeDateText(pageDateText),
+    uploadDate: "",
+    publishDateRaw: microDateRaw,
     description: textOf(micro.description) || textOf(secondary?.attributedDescription),
     isLive: details.isLiveContent ?? null,
   };

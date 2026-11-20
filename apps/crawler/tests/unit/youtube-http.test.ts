@@ -207,7 +207,7 @@ test("parseYouTubeVideoDetail prefers player data and default (not toggled) like
   assert.equal(detail.viewCount, "12345");
   assert.equal(detail.viewCountText, "12,345 views");
   assert.equal(detail.likeText, "7", "microformat likeCount 为 0 时用未点赞按钮的数字");
-  assert.equal(detail.publishDate, "2026-01-02T03:04:05-08:00");
+  assert.equal(detail.publishDate, "2026-01-02", "发布时间取 next 的 dateText，不取 player 的 publishDate");
   assert.equal(detail.description, "完整描述");
   assert.equal(detail.durationSeconds, "42");
   assert.equal(findCommentsToken(next), "COMMENT_TOKEN");
@@ -298,48 +298,36 @@ test("textOf reads content, simpleText, text and runs", () => {
   assert.equal(textOf(null), "");
 });
 
-test("parseYouTubeVideoDetail 不用 next 的 dateText 兜底：主字段缺失就留空，交给上层报错", () => {
+test("发布时间只用 next.dateText 这一处：player 有精确时间也不参与", () => {
   const player = {
-    videoDetails: { title: "Shorts 标题", author: "BYD España", channelId: "UC123", lengthSeconds: "25", viewCount: "4341" },
-    microformat: { playerMicroformatRenderer: { title: { simpleText: "Shorts 标题" } } },
+    videoDetails: { title: "Shorts 标题", viewCount: "4341" },
+    microformat: { playerMicroformatRenderer: { publishDate: "2026-11-16T09:01:49-08:00", uploadDate: "2026-11-16T09:01:49-08:00" } },
   };
-  const next = {
+  const withDateText = {
     contents: {
       twoColumnWatchNextResults: {
         results: {
           results: {
-            contents: [{
-              videoPrimaryInfoRenderer: {
-                dateText: { simpleText: "2026/11/16" },
-                relativeDateText: { simpleText: "3 日前" },
-              },
-            }],
+            contents: [{ videoPrimaryInfoRenderer: { dateText: { simpleText: "2026/11/16" }, relativeDateText: { simpleText: "3 日前" } } }],
           },
         },
       },
     },
   };
-  const detail = parseYouTubeVideoDetail(player, next, "htk-6sQn5eM");
-  assert.equal(detail.publishDate, "");
-  assert.equal(detail.uploadDate, "");
-  assert.equal(detail.viewCount, "4341");
-});
+  assert.equal(parseYouTubeVideoDetail(player, withDateText, "htk-6sQn5eM").publishDate, "2026-11-16");
+  assert.equal(parseYouTubeVideoDetail(player, withDateText, "htk-6sQn5eM").uploadDate, "");
 
-test("parseYouTubeVideoDetail keeps the exact player date when present", () => {
-  const player = {
-    videoDetails: { title: "标题" },
-    microformat: { playerMicroformatRenderer: { publishDate: "2026-11-16T09:01:49-08:00", uploadDate: "2026-11-16T09:01:49-08:00" } },
+  // dateText 缺失：即使 player 里两个字段都在，也不拿它们顶上
+  const withoutDateText = {
+    contents: { twoColumnWatchNextResults: { results: { results: { contents: [{ videoPrimaryInfoRenderer: {} }] } } } },
   };
-  const next = {
-    contents: {
-      twoColumnWatchNextResults: {
-        results: { results: { contents: [{ videoPrimaryInfoRenderer: { dateText: { simpleText: "2026/11/16" } } }] } },
-      },
-    },
-  };
-  const detail = parseYouTubeVideoDetail(player, next, "vid1");
-  assert.equal(detail.publishDate, "2026-11-16T09:01:49-08:00");
-  assert.equal(detail.uploadDate, "2026-11-16T09:01:49-08:00");
+  const detail = parseYouTubeVideoDetail(player, withoutDateText, "htk-6sQn5eM");
+  assert.equal(detail.publishDate, "", "dateText 缺失就该留空交给上层报错");
+  assert.deepEqual(detail.publishDateRaw, {
+    publishDate: "2026-11-16T09:01:49-08:00",
+    uploadDate: "2026-11-16T09:01:49-08:00",
+    dateText: "",
+  }, "原始值只用于诊断，不参与取值");
 });
 
 test("assertPublishTime 对取不到发布时间的内容直接报错（不再静默跳过）", async () => {

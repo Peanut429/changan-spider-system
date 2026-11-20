@@ -1,5 +1,6 @@
 import { openBrowserSession } from "../core/browser.ts";
 import { FatalPlatformError } from "./errors.ts";
+import { writeRunLog } from "../db/repositories/runs.ts";
 import { isRunAccountCompleted, startScrapeRunAccount } from "../db/repositories/run-accounts.ts";
 import { persistScrapeAccountResult } from "../db/persistence/persist-account-result.ts";
 import type { SourceAccount } from "../core/accounts.ts";
@@ -75,6 +76,24 @@ export async function runPlatform({
         });
       } catch (error: any) {
         const message = error?.message || String(error);
+
+        // 把"当时的现场数据"落库：终端日志会滚掉，error_message 只有一句话。
+        if (error?.context && typeof error.context === "object") {
+          await writeRunLog(ctx.db, {
+            runId: ctx.runId,
+            accountRunId: null,
+            level: "error",
+            step: error.name === "PublishTimeError" ? "publish_time" : "scrape_error",
+            message,
+            errorCode: error?.errorCode || null,
+            errorStack: error?.stack || null,
+            pageUrl: error?.pageUrl || null,
+            context: error.context as Record<string, unknown>,
+          }).catch((logError: any) => {
+            ctx.logger.error(`账号 ${account.account} 诊断日志写入失败：${logError?.message || logError}`);
+          });
+        }
+
         ctx.logger.error(`账号 ${account.account} 失败：${message}`);
 
         await persistScrapeAccountResult(ctx.db, {

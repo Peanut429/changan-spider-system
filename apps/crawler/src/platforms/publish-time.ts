@@ -52,6 +52,32 @@ export function describeTimeFields(source: unknown, limit = 12): Record<string, 
   return out;
 }
 
+/**
+ * 带现场数据的平台级错误：runner 会把 context（含完整原始响应）写进 scrape_event_logs.context_json，
+ * 这样终端日志滚掉了也能在库里查到"当时到底拿到了什么"。
+ */
+export class PublishTimeError extends FatalPlatformError {
+  readonly errorCode = "PUBLISH_TIME_MISSING";
+  readonly context: Record<string, unknown>;
+  readonly pageUrl: string;
+
+  constructor(message: string, context: Record<string, unknown>, pageUrl: string) {
+    super(message);
+    this.name = "PublishTimeError";
+    this.context = context;
+    this.pageUrl = pageUrl;
+  }
+}
+
+/** 原样存库前的兜底：遇到循环引用/不可序列化就退回字符串快照。 */
+function snapshot(value: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return shorten(value, 4000);
+  }
+}
+
 export type PublishTimeContext = {
   platform: string;
   account: string;
@@ -92,9 +118,20 @@ export function assertPublishTime(ctx: PublishTimeContext): void {
   ].join("\n  ");
 
   console.error(`[${ctx.platform}] 取不到发布时间，疑似上游结构变化，需要更新解析脚本：\n  ${where}`);
-  throw new FatalPlatformError(
+  throw new PublishTimeError(
     `${ctx.platform} 取不到发布时间（account=${ctx.account || "-"}, type=${ctx.kind || "-"}, url=${ctx.url || "-"}）：`
     + `publishTime=${JSON.stringify(ctx.publishTime ?? null)}，`
     + `时间字段=${JSON.stringify(timeFields)}。上游结构可能已变化，需更新解析脚本`,
+    {
+      platform: ctx.platform,
+      account: ctx.account || "",
+      kind: ctx.kind || "",
+      url: ctx.url || "",
+      publishTime: ctx.publishTime ?? null,
+      timeFields,
+      // 完整原始响应：改版时靠它定位字段去哪了
+      raw: snapshot(ctx.source),
+    },
+    ctx.url || "",
   );
 }

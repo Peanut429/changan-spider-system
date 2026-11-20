@@ -124,6 +124,9 @@ export async function writeRunLog(
     errorCode,
     errorStack,
     context,
+    accountRunId,
+    pageUrl,
+    contentUrl,
   }: {
     runId: string;
     level: "debug" | "info" | "warn" | "error";
@@ -132,18 +135,21 @@ export async function writeRunLog(
     errorCode?: string | null;
     errorStack?: string | null;
     context?: Record<string, unknown>;
+    accountRunId?: string | null;
+    pageUrl?: string | null;
+    contentUrl?: string | null;
   },
 ): Promise<void> {
   await db.insert(scrapeEventLogs).values({
     id: prefixedId("log"),
     runId,
-    accountRunId: null,
+    accountRunId: accountRunId || null,
     attemptId: null,
     level,
     step,
     message: message.slice(0, 10000),
-    pageUrl: null,
-    contentUrl: null,
+    pageUrl: pageUrl || null,
+    contentUrl: contentUrl || null,
     selector: null,
     durationMs: null,
     errorCode: errorCode || null,
