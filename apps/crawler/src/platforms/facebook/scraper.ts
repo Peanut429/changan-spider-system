@@ -1,3 +1,4 @@
+import { assertPublishTime } from "../publish-time.ts";
 import { dateRangePosition, nowInDisplayTimeZone } from "../../core/time.ts";
 import { pageFetch } from "../../core/page-http.ts";
 import { extractFacebookUfiTexts } from "./ufi.ts";
@@ -136,7 +137,9 @@ function extractStoryRow(story, account) {
     ?? story.comet_sections?.timestamp?.story?.creation_time,
   );
   const url = normalizeFacebookContentUrl(contentStory?.wwwURL || story.permalink_url || "");
-  if (!Number.isFinite(publishSeconds) || !url) return null;
+  if (!url) return null;
+  // 时间不能丢：判不出来就没法算窗口，直接把现场数据打进日志并抛错。
+  assertPublishTime({ platform: "facebook", account, kind: classifyStory(story), url, publishTime: publishSeconds, source: story });
 
   const postId = String(story.post_id || contentStory?.post_id || "");
   const actors = contentStory?.actors || [];

@@ -1,6 +1,5 @@
 import { dateRangePosition, nowInDisplayTimeZone } from "../../core/time.ts";
 import {
-  approxRelativePublishedDate,
   approxRelativePublishedRange,
   extractExactViewCount,
   extractListRelativePublished,
@@ -19,6 +18,8 @@ import {
   shortRowNeedsRetry,
 } from "./shorts.ts";
 import type { AccountContext, AccountScrapeResult, PlatformScraper } from "../types.ts";
+import { FatalPlatformError } from "../errors.ts";
+import { assertPublishTime } from "../publish-time.ts";
 import { gotoWithRetry } from "../../core/page-http.ts";
 import { autoAcceptYouTubeConsent } from "./page.ts";
 import {
@@ -38,6 +39,38 @@ type YouTubeArgs = {
   limit: number;
   commentTimeoutMs: number;
 };
+
+// 列表是按发布时间倒序的，所以连续遇到「早于筛选周期」就可以提前收工。
+const MAX_CONSECUTIVE_BEFORE = 3;
+
+type RangeScan = { before: number };
+
+function trackRangeScan(scan: RangeScan, publishTime: unknown, hasError: boolean, args: YouTubeArgs) {
+  const position = dateRangePosition(publishTime, args);
+  if (args.sinceTime == null || hasError) {
+    scan.before = 0;
+    return position;
+  }
+  scan.before = position === "before" ? scan.before + 1 : 0;
+  return position;
+}
+
+function reachedScanStop(scan: RangeScan, args: YouTubeArgs): boolean {
+  return args.sinceTime != null && scan.before >= MAX_CONSECUTIVE_BEFORE;
+}
+
+/** 发布时间不合法就抛错（细节见 platforms/publish-time.ts），抓取本身失败的行跳过。 */
+function assertRowPublishTime(row: any, kind: string, account: string) {
+  if (row.error) return;
+  assertPublishTime({
+    platform: "youtube",
+    account,
+    kind,
+    url: row.url,
+    publishTime: row.publishTime,
+    source: row,
+  });
+}
 
 function normalizeVideosUrl(input) {
   const url = new URL(input);
@@ -493,7 +526,9 @@ async function scrapeOneVideo(page, meta, commentTimeoutMs) {
 }
 
 function normalizeYouTubeResult(result, account, scrapedAt) {
-  const publishTime = result.uploadDate || result.publishDate || result.hoverPublishDate || parseYouTubeDateText(result.hoverMetadataText) || approxRelativePublishedDate(result.listRelativePublished) || "";
+  // 不用「3 周前」这类相对时间反推：日期会系统性偏晚（最长差一个月）。
+  // 精确来源全空时留空，交给 assertPublishTime 当结构性异常处理。
+  const publishTime = result.uploadDate || result.publishDate || result.hoverPublishDate || parseYouTubeDateText(result.hoverMetadataText) || "";
   const exactViewCount = normalizeExactViewCount(result.viewCount) || normalizeExactViewCount(result.hoverViewCount) || extractExactViewCount(result.hoverMetadataText);
   return {
     account,
@@ -616,7 +651,7 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
   console.log(`[YouTube] HTTP 频道 ${source.account} 找到 ${list.length} 个普通视频。`);
 
   let failedVideos = 0;
-  let consecutiveBeforeRange = 0;
+  const scan: RangeScan = { before: 0 };
   for (const [offset, item] of list.entries()) {
     const meta: HttpRowMeta = {
       index: offset + 1,
@@ -632,17 +667,19 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
     try {
       const detail = await fetchYouTubeVideoDetail(session, item.videoId, { commentTimeoutMs: args.commentTimeoutMs });
       const row = normalizeYouTubeResult({ ...meta, ...httpDetailToBrowserResult(detail), scrapedAt }, source.account, scrapedAt);
-      const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+      assertRowPublishTime(row, "视频", source.account);
+      const position = trackRangeScan(scan, row.publishTime, Boolean(row.error), args);
+      const keep = (args.sinceTime == null && args.untilTime == null) || position === "inside";
       if (keep) contentRows.push(row);
-      consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-      console.log(`${keep ? "保留" : "跳过"} 观看=${detail.viewCount || "缺失"} 点赞=${detail.likeText || "缺失"} 评论=${detail.commentText || "缺失"}`);
-      if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-        console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的视频，停止继续抓取。`);
+      console.log(`${keep ? "保留" : "跳过"} 时间=${row.publishTime} 观看=${detail.viewCount || "缺失"} 点赞=${detail.likeText || "缺失"} 评论=${detail.commentText || "缺失"}`);
+      if (reachedScanStop(scan, args)) {
+        console.log(`连续遇到 ${scan.before} 条早于筛选周期的视频，停止继续抓取。`);
         break;
       }
     } catch (error: any) {
+      if (error instanceof FatalPlatformError) throw error;
       failedVideos += 1;
-      consecutiveBeforeRange = 0;
+      scan.before = 0;
       const message = error?.message || String(error);
       const row = normalizeYouTubeResult({ ...meta, scrapedAt, error: message }, source.account, scrapedAt);
       const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
@@ -653,7 +690,6 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
   if (list.length > 0 && failedVideos === list.length) {
     throw new YouTubeHttpError("所有普通视频的详情请求都失败了");
   }
-
   const shortsUrl = normalizeShortsUrl(source.link);
   console.log(`[YouTube] HTTP 打开频道 Shorts 页：${source.account} ${shortsUrl}`);
   const shortsSession = await createYouTubeHttpSession(ctx.page, shortsUrl, {
@@ -673,7 +709,7 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
     let shortAttempted = 0;
     let shortFailed = 0;
     let stopShorts = false;
-    let consecutiveBeforeRange = 0;
+    const shortScan: RangeScan = { before: 0 };
 
     if (!shortItems.length && !shortContinuation) {
       throw new YouTubeHttpError("Shorts 标签页没有解析到任何 Shorts");
@@ -701,9 +737,9 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
         const existing = contentRows.find((row) => row.account === source.account && row.url === meta.url && !row.error);
         if (existing) {
           console.log(`[Shorts ${meta.index}/${shortItems.length}] 已存在，跳过 ${meta.url}`);
-          consecutiveBeforeRange = args.sinceTime != null && dateRangePosition(existing.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-          if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-            console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+          trackRangeScan(shortScan, existing.publishTime, false, args);
+          if (reachedScanStop(shortScan, args)) {
+            console.log(`连续遇到 ${shortScan.before} 条早于筛选周期的 Shorts，停止继续抓取。`);
             stopShorts = true;
             break;
           }
@@ -716,22 +752,24 @@ async function scrapeAccountViaHttp(ctx: AccountContext): Promise<AccountScrapeR
         try {
           const detail = await fetchYouTubeVideoDetail(shortsSession, item.videoId, { commentTimeoutMs: args.commentTimeoutMs });
           const row = normalizeYouTubeShortResult(shortResultFromDetail(meta, detail, scrapedAt), source.account, scrapedAt);
-          const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+          assertRowPublishTime(row, "短视频", source.account);
+          const position = trackRangeScan(shortScan, row.publishTime, Boolean(row.error), args);
+          const keep = (args.sinceTime == null && args.untilTime == null) || position === "inside";
           if (keep) contentRows.push(row);
-          consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-          console.log(`${keep ? "保留" : "跳过"} 播放=${detail.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}`);
-          if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-            console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+          console.log(`${keep ? "保留" : "跳过"} 时间=${row.publishTime} 播放=${detail.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}`);
+          if (reachedScanStop(shortScan, args)) {
+            console.log(`连续遇到 ${shortScan.before} 条早于筛选周期的 Shorts，停止继续抓取。`);
             stopShorts = true;
             break;
           }
         } catch (error: any) {
+          if (error instanceof FatalPlatformError) throw error;
           shortFailed += 1;
+          shortScan.before = 0;
           const message = error?.message || String(error);
           const row = normalizeYouTubeShortResult({ ...meta, shortId: meta.videoId, scrapedAt, error: message }, source.account, scrapedAt);
           const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
           if (keep) contentRows.push(row);
-          consecutiveBeforeRange = 0;
           console.log(`错误=${message}`);
         }
       }
@@ -810,6 +848,8 @@ export function createYouTubeScraper(): PlatformScraper {
           console.log(`[YouTube] HTTP 抓取完成：${ctx.account.account}`);
           return result;
         } catch (error: any) {
+          // 结构性问题（取不到发布时间）在浏览器路径同样会失败，直接抛，不做无谓的降级重试。
+          if (error instanceof FatalPlatformError) throw error;
           if (mode === "http") throw error;
           console.warn(`[YouTube] HTTP 抓取失败，降级到浏览器页面抓取：${error?.message || error}`);
         }
@@ -866,6 +906,7 @@ async function scrapeAccountViaBrowser(ctx: AccountContext): Promise<AccountScra
     process.stdout.write(`[${meta.index}/${list.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
     const result = await scrapeOneVideo(ctx.page, meta, args.commentTimeoutMs);
     const row = normalizeYouTubeResult(result, source.account, scrapedAt);
+    assertRowPublishTime(row, "视频", source.account);
     const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
     if (keep) contentRows.push(row);
     const views = result.viewCount || "缺失";
@@ -881,14 +922,14 @@ async function scrapeAccountViaBrowser(ctx: AccountContext): Promise<AccountScra
     console.log(`频道 ${source.account} 没有 Shorts 标签页，跳过 Shorts 抓取。`);
   } else {
     console.log(`频道 ${source.account} 找到 ${shortsList.items.length} 个 Shorts。`);
-    let consecutiveBeforeRange = 0;
+    const shortScan: RangeScan = { before: 0 };
     for (const meta of shortsList.items) {
       const existing = contentRows.find((row) => row.account === source.account && row.url === meta.url && !row.error);
       if (existing) {
         console.log(`[Shorts ${meta.index}/${shortsList.items.length}] 已存在，跳过 ${meta.url}`);
-        consecutiveBeforeRange = args.sinceTime != null && dateRangePosition(existing.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-        if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-          console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+        trackRangeScan(shortScan, existing.publishTime, false, args);
+        if (reachedScanStop(shortScan, args)) {
+          console.log(`连续遇到 ${shortScan.before} 条早于筛选周期的 Shorts，停止继续抓取。`);
           break;
         }
         continue;
@@ -896,12 +937,13 @@ async function scrapeAccountViaBrowser(ctx: AccountContext): Promise<AccountScra
       process.stdout.write(`[Shorts ${meta.index}/${shortsList.items.length}] ${String(meta.listTitle || "").slice(0, 90)} ... `);
       const result = await scrapeOneShort(ctx.page, meta);
       const row = normalizeYouTubeShortResult(result, source.account, scrapedAt);
-      const keep = (args.sinceTime == null && args.untilTime == null) || dateRangePosition(row.publishTime, args) === "inside";
+      assertRowPublishTime(row, "短视频", source.account);
+      const position = trackRangeScan(shortScan, row.publishTime, Boolean(row.error), args);
+      const keep = (args.sinceTime == null && args.untilTime == null) || position === "inside";
       if (keep) contentRows.push(row);
-      consecutiveBeforeRange = args.sinceTime != null && !row.error && dateRangePosition(row.publishTime, args) === "before" ? consecutiveBeforeRange + 1 : 0;
-      console.log(`${keep ? "保留" : "跳过"} 播放=${result.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}${result.error ? ` 错误=${result.error}` : ""}`);
-      if (args.sinceTime != null && consecutiveBeforeRange >= 3) {
-        console.log(`连续遇到 ${consecutiveBeforeRange} 条早于筛选周期的 Shorts，停止继续抓取。`);
+      console.log(`${keep ? "保留" : "跳过"} 时间=${row.publishTime} 播放=${result.viewCount || "缺失"} 点赞=${row.likeText || "缺失"} 评论=${row.commentText || "缺失"}${result.error ? ` 错误=${result.error}` : ""}`);
+      if (reachedScanStop(shortScan, args)) {
+        console.log(`连续遇到 ${shortScan.before} 条早于筛选周期的 Shorts，停止继续抓取。`);
         break;
       }
     }

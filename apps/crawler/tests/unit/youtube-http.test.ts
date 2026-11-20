@@ -297,3 +297,69 @@ test("textOf reads content, simpleText, text and runs", () => {
   assert.equal(textOf({ runs: [{ text: "d" }, { text: "e" }] }), "de");
   assert.equal(textOf(null), "");
 });
+
+test("parseYouTubeVideoDetail 不用 next 的 dateText 兜底：主字段缺失就留空，交给上层报错", () => {
+  const player = {
+    videoDetails: { title: "Shorts 标题", author: "BYD España", channelId: "UC123", lengthSeconds: "25", viewCount: "4341" },
+    microformat: { playerMicroformatRenderer: { title: { simpleText: "Shorts 标题" } } },
+  };
+  const next = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [{
+              videoPrimaryInfoRenderer: {
+                dateText: { simpleText: "2026/11/16" },
+                relativeDateText: { simpleText: "3 日前" },
+              },
+            }],
+          },
+        },
+      },
+    },
+  };
+  const detail = parseYouTubeVideoDetail(player, next, "htk-6sQn5eM");
+  assert.equal(detail.publishDate, "");
+  assert.equal(detail.uploadDate, "");
+  assert.equal(detail.viewCount, "4341");
+});
+
+test("parseYouTubeVideoDetail keeps the exact player date when present", () => {
+  const player = {
+    videoDetails: { title: "标题" },
+    microformat: { playerMicroformatRenderer: { publishDate: "2026-11-16T09:01:49-08:00", uploadDate: "2026-11-16T09:01:49-08:00" } },
+  };
+  const next = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: { results: { contents: [{ videoPrimaryInfoRenderer: { dateText: { simpleText: "2026/11/16" } } }] } },
+      },
+    },
+  };
+  const detail = parseYouTubeVideoDetail(player, next, "vid1");
+  assert.equal(detail.publishDate, "2026-11-16T09:01:49-08:00");
+  assert.equal(detail.uploadDate, "2026-11-16T09:01:49-08:00");
+});
+
+test("assertPublishTime 对取不到发布时间的内容直接报错（不再静默跳过）", async () => {
+  const { assertPublishTime } = await import("../../src/platforms/publish-time.ts");
+  const args = {
+    sinceTime: Date.parse("2026-08-21T00:00:00+08:00"),
+    untilTime: Date.parse("2026-11-19T23:59:59+08:00"),
+    rangeTimeZone: "Asia/Shanghai",
+    limit: 0,
+    commentTimeoutMs: 30000,
+  };
+  const ctx = (publishTime: unknown, extra: Record<string, unknown> = {}) => ({
+    platform: "youtube", account: "BYD España", kind: "短视频", url: "https://www.youtube.com/shorts/x", publishTime, ...extra,
+  });
+  // 正常：有精确日期 / 只有日期 / 数字时间戳
+  assertPublishTime(ctx("2026-11-19T06:21:23-08:00"));
+  assertPublishTime(ctx("2026-11-19"));
+  assertPublishTime(ctx(Date.parse("2026-11-19T00:00:00Z")));
+  // 异常：拿不到时间 / 解析不了
+  assert.throws(() => assertPublishTime(ctx("")), /取不到发布时间/);
+  assert.throws(() => assertPublishTime(ctx("3 日前")), /取不到发布时间/);
+  assert.throws(() => assertPublishTime(ctx(null)), /取不到发布时间/);
+});

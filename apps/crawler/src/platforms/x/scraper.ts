@@ -1,3 +1,4 @@
+import { assertPublishTime } from "../publish-time.ts";
 import { nowInDisplayTimeZone } from "../../core/time.ts";
 import { truncateText } from "../../core/strings.ts";
 import { pageFetch } from "../../core/page-http.ts";
@@ -164,6 +165,16 @@ function tweetFromItemContent(itemContent) {
   const legacy = source.legacy || {};
   if (!legacy.id_str) return null;
   const screenName = source.core?.user_results?.result?.core?.screen_name || "";
+  // created_at 缺失时 Date.parse 是 NaN，后面 toISOString() 会抛一个看不懂的 RangeError，
+  // 这里提前判掉，把原始 legacy 打进日志。
+  assertPublishTime({
+    platform: "x",
+    account: screenName,
+    kind: "帖子",
+    url: `https://x.com/${screenName}/status/${legacy.id_str}`,
+    publishTime: legacy.created_at ? Date.parse(legacy.created_at) : NaN,
+    source: legacy,
+  });
   return {
     id: legacy.id_str,
     createdAt: legacy.created_at,

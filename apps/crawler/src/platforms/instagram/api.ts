@@ -1,3 +1,4 @@
+import { assertPublishTime } from "../publish-time.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
@@ -149,6 +150,7 @@ export async function scrapeInstagramApiPosts({
         api: postsEndpoint === "v1" ? "fetch_user_posts" : "v2_fetch_user_posts",
       });
       const identity = String(row.url || row.shortcode || row.pk || row.mediaId || "");
+      assertPublishTime({ platform: "instagram", account, kind: row.type, url: row.url, publishTime: row.publishTime, source: item });
       const position = dateRangePosition(row.publishTime, args);
       const inRange = position === "inside";
       const duplicate = identity && seen.has(identity);
@@ -262,6 +264,7 @@ export async function scrapeInstagramApiReels({
       fetched += 1;
       const row = instagramApiPostToContentRow({ item, account, userId, requestId: page.requestId, api: "fetch_user_reels" });
       const identity = String(row.url || row.shortcode || row.pk || row.mediaId || "");
+      assertPublishTime({ platform: "instagram", account, kind: row.type, url: row.url, publishTime: row.publishTime, source: item });
       const position = dateRangePosition(row.publishTime, args);
       const inRange = position === "inside";
       const duplicate = identity && seen.has(identity);

@@ -50,6 +50,18 @@ function cell(row: string[] | undefined, index: string): string {
   return row && Number.isInteger(i) ? String(row[i] ?? '').trim() : ''
 }
 
+/** 收集隐藏工作表（1=隐藏，2=深度隐藏），默认不选它们。 */
+function readHiddenSheets(workbook: any): Set<string> {
+  const hidden = new Set<string>()
+  const meta = workbook?.Workbook?.Sheets
+  if (Array.isArray(meta)) {
+    for (const item of meta) {
+      if (item?.Hidden) hidden.add(String(item.name ?? ''))
+    }
+  }
+  return hidden
+}
+
 function guessHeaderRow(matrix: Matrix): number {
   const limit = Math.min(matrix.length, 12)
   let best = 0
@@ -376,8 +388,12 @@ export function ExcelImportPreview({
   onImported: () => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  // 文件只解析一次，切换工作表时复用这份 workbook；不能靠 input.files 重读，
+  // 因为选中文件后上传区（含 input）会被卸载，inputRef.current 变成 null。
+  const workbookRef = useRef<{ workbook: any; utils: any } | null>(null)
   const [fileName, setFileName] = useState('')
   const [sheetNames, setSheetNames] = useState<string[]>([])
+  const [hiddenSheetNames, setHiddenSheetNames] = useState<Set<string>>(new Set())
   const [activeSheet, setActiveSheet] = useState('')
   const [matrix, setMatrix] = useState<Matrix>([])
   const [headerRow, setHeaderRow] = useState(0)
@@ -460,15 +476,21 @@ export function ExcelImportPreview({
     try {
       const XLSX = await import('xlsx')
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      const names = workbook.SheetNames || []
+      const names: string[] = workbook.SheetNames || []
       if (!names.length) throw new Error('工作簿里没有可读的工作表')
+      const hidden = readHiddenSheets(workbook)
+      workbookRef.current = { workbook, utils: XLSX.utils }
       setFileName(file.name)
       setSheetNames(names)
+      setHiddenSheetNames(hidden)
       setPlatformFilter('all')
-      applySheet(names[0], workbook, XLSX.utils)
+      // 默认落在第一个可见工作表上，避免把隐藏的历史表当成正式数据。
+      applySheet(names.find((name) => !hidden.has(name)) || names[0], workbook, XLSX.utils)
     } catch (cause) {
+      workbookRef.current = null
       setFileName('')
       setSheetNames([])
+      setHiddenSheetNames(new Set())
       setMatrix([])
       setError(cause instanceof Error ? cause.message : 'Excel 解析失败')
     } finally {
@@ -476,20 +498,13 @@ export function ExcelImportPreview({
     }
   }
 
-  const selectSheet = async (name: string) => {
-    if (!fileName) return
-    setLoading(true)
+  const selectSheet = (name: string) => {
+    const cached = workbookRef.current
+    if (!cached) return
     try {
-      // 重新解析当前文件需要保留原始 workbook；这里从 input 文件重新读取。
-      const file = inputRef.current?.files?.[0]
-      if (!file) return
-      const XLSX = await import('xlsx')
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      applySheet(name, workbook, XLSX.utils)
+      applySheet(name, cached.workbook, cached.utils)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '工作表读取失败')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -507,9 +522,11 @@ export function ExcelImportPreview({
   }
 
   const resetFile = () => {
+    workbookRef.current = null
     setFileName('')
     setPlatformFilter('all')
     setSheetNames([])
+    setHiddenSheetNames(new Set())
     setActiveSheet('')
     setMatrix([])
     setHeaderRow(0)
@@ -632,10 +649,14 @@ export function ExcelImportPreview({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <p className="text-xs font-medium">工作表</p>
-                <Select value={activeSheet} onValueChange={(value) => void selectSheet(value)}>
+                <Select value={activeSheet} onValueChange={selectSheet}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent className="cx-portal">
-                    {sheetNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                    {sheetNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {hiddenSheetNames.has(name) ? `${name}（隐藏）` : name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

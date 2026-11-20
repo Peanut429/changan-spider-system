@@ -1,3 +1,4 @@
+import { assertPublishTime } from "../publish-time.ts";
 import { dateRangePosition, nowInDisplayTimeZone } from "../../core/time.ts";
 import { classifyTikTokPageState, shouldRestartTikTokAccountScrape } from "../../core/tiktok-page-state.ts";
 import { truncateText } from "../../core/strings.ts";
@@ -413,7 +414,19 @@ function statText(primary, fallback = "") {
 function itemPublishTime(item) {
   const seconds = Number(item?.createTime);
   if (Number.isFinite(seconds) && seconds > 0) return new Date(seconds * 1000).toISOString();
-  return idToIso(item?.id || "");
+  // 作品 ID 前 32 位是秒级时间戳（精确值，不是估算），允许作为时间来源；
+  // 两个都拿不到就说明结构变了，不能丢。
+  const derived = idToIso(item?.id || "");
+  if (derived) return derived;
+  assertPublishTime({
+    platform: "tiktok",
+    account: item?.author?.uniqueId || "",
+    kind: "作品",
+    url: item?.id ? `https://www.tiktok.com/@${item?.author?.uniqueId || ""}/video/${item.id}` : "",
+    publishTime: "",
+    source: item,
+  });
+  return "";
 }
 
 function isPhotoItem(item) {
@@ -709,6 +722,16 @@ async function collectPostLinks(page, account, args, rawState = null) {
       if (seen.has(item.id)) continue;
       item.publishTime = idToIso(item.id);
       item.publishTimeRaw = "";
+      if (!item.publishTime) {
+        assertPublishTime({
+          platform: "tiktok",
+          account: item.account || account,
+          kind: "作品",
+          url: item.url || "",
+          publishTime: "",
+          source: item,
+        });
+      }
       const position = dateRangePosition(item.publishTime, args);
       seen.set(item.id, item);
       added += 1;

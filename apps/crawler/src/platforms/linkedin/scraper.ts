@@ -1,3 +1,4 @@
+import { assertPublishTime } from "../publish-time.ts";
 import { dateRangePosition } from "../../core/time.ts";
 import { activityIdsFromRsc, parseRscFeed } from "./rsc-parser.ts";
 import { pageFetch } from "../../core/page-http.ts";
@@ -61,7 +62,10 @@ function isInvalidCompanyLinkError(error): boolean {
 // ── 内容行构建（对齐 persistScrapeAccountResult 的字段） ──
 
 function toContentRows(posts, source, args) {
-  let rows = posts.map((post) => ({
+  let rows = posts.map((post) => {
+    // 时间是 activityId 里编的 Snowflake 时间戳；推不出来就是上游 ID 格式变了，不能丢。
+    assertPublishTime({ platform: "linkedin", account: source.account, kind: "帖子", url: post.url, publishTime: post.publishIso, source: post });
+    return {
     account: source.account,
     activityId: post.activityId,
     url: post.url,
@@ -72,7 +76,8 @@ function toContentRows(posts, source, args) {
     commentText: post.commentCount != null ? String(post.commentCount) : "",
     shareText: post.repostCount != null ? String(post.repostCount) : "",
     type: "帖子",
-  }));
+    };
+  });
   // 只保留抓取窗口内的内容
   rows = rows.filter((row) => dateRangePosition(row.publishTime, args) === "inside");
 
