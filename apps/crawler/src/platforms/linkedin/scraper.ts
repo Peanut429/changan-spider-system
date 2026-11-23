@@ -112,6 +112,23 @@ async function collectProfileFromHtml(page, source) {
   };
 }
 
+// 没有动态的账号也要落一条账号指标（粉丝数等）。公司页 HTML 读不到时退化成账号名，
+// 不因为资料缺失把“0 条动态”变成一条失败记录。
+async function collectEmptyAccountProfile(page, source) {
+  try {
+    return await collectProfileFromHtml(page, source);
+  } catch (error: any) {
+    console.error(`账号 ${source.account} 资料读取失败（不影响 0 条记录）：${error?.message || error}`);
+    return {
+      ...source,
+      displayName: source.account,
+      followersText: "",
+      followingText: "",
+      postsText: "",
+    };
+  }
+}
+
 // ── RSC feed 抓取 ──
 
 // 公司动态只需要文字和互动数，不需要图片/视频。整条 feed 滚下来会渲染几百条帖子，
@@ -226,6 +243,7 @@ async function readCompanyOrganizationId(page) {
 // 打开一个公司页，切一次“最新”，抓一个 count=3 的分页请求作为模板：
 //   - initialBody 用来请求每个 organization 的第一页并拿 token；
 //   - pageBody 复用同一个结构，翻页时再改 count/startIndex/token。
+// 公司页没有动态时没有排序控件、也没有分页请求，返回 { kind: "empty" }，不是失败。
 async function captureTemplateOnce(page, source) {
   const requests = [];
   const detach = capturePaginationRequests(page, requests);
@@ -233,9 +251,17 @@ async function captureTemplateOnce(page, source) {
     await page.goto(source.link, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => null);
     await page.waitForTimeout(3000);
     assertCompanyPageAvailable(page);
-    await ensureSortRecent(page, 15000, () => {
-      requests.length = 0;
-    });
+    try {
+      await ensureSortRecent(page, 15000, () => {
+        requests.length = 0;
+      });
+    } catch (error) {
+      if (isEmptyCompanyFeedError(error)) {
+        console.log(`公司页没有动态，跳过模板抓取：${source.link}`);
+        return { kind: "empty" };
+      }
+      throw error;
+    }
 
     const initial = await waitForPaginationRequest(requests, (request) => {
       const payload = requestPayload(request);
@@ -246,6 +272,7 @@ async function captureTemplateOnce(page, source) {
 
     console.log(`模板已就绪：organizationId=${organizationId}（count=3 模板，翻页时再改 count/startIndex/token）`);
     return {
+      kind: "template",
       organizationId,
       initialBody: initial.body,
       // 翻页只需要这个结构，scrapeAccountViaHttp 会自己改 count/startIndex/token。
@@ -259,6 +286,7 @@ async function captureTemplateOnce(page, source) {
 }
 
 // 模板抓取失败通常是页面/接口还没就绪（15 秒内没等到分页请求），不是账号问题，重试同一页即可。
+// 公司页没有动态是确定结果（{ kind: "empty" }），不重试。
 async function captureTemplate(page, source) {
   let lastError = null;
   for (let attempt = 1; attempt <= TEMPLATE_CAPTURE_ATTEMPTS; attempt++) {
@@ -328,6 +356,111 @@ async function discoverOrganizationId(page, source) {
   throw lastError;
 }
 
+// ── 空状态判断 ──
+
+// 公司主页一条动态都没有时，页面不渲染 feed：没有排序控件、没有帖子卡片，只会显示一句空状态文案。
+// 这种情况是“0 条”，不是抓取失败；文案随账号语言变，中英文都收几条。
+const EMPTY_FEED_COPY = /还没有动态|暂无企业快讯|暂时没有动态|还没有发布|No posts yet|No updates yet|No company updates|hasn't posted|has not posted/i;
+
+// RSC 响应里的中文可能是 \uXXXX 转义，原始文本和反转义后的文本都看一遍。
+function containsEmptyFeedCopy(text) {
+  if (EMPTY_FEED_COPY.test(text)) return true;
+  if (!/\\u[0-9a-fA-F]{4}/.test(text)) return false;
+  return EMPTY_FEED_COPY.test(
+    text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16))),
+  );
+}
+
+/** 公司页没有任何动态：按 0 条入库，不当抓取失败。 */
+class EmptyCompanyFeedError extends Error {
+  constructor() {
+    super("LinkedIn 公司页没有动态");
+    this.name = "EmptyCompanyFeedError";
+  }
+}
+
+function isEmptyCompanyFeedError(error) {
+  return error?.name === "EmptyCompanyFeedError";
+}
+
+export type CompanyFeedSnapshot = {
+  text: string;
+  hasSortControl: boolean;
+  hasPost: boolean;
+  hasHeader: boolean;
+};
+
+/**
+ * 公司页 feed 的状态：
+ *   control  排序控件在 → 正常的有动态页面
+ *   empty    明确显示“还没有动态”
+ *   posts    有帖子但没有排序控件 → 页面结构变了，要报错
+ *   blank    什么都没认出来（页面还没渲染完，或者整页没加载出来）
+ *
+ * 先判排序控件：有控件的页面一定是正常 feed，帖子正文里恰好出现“还没有动态”也不会被误判成空账号。
+ */
+export function classifyCompanyFeed(
+  snapshot: CompanyFeedSnapshot,
+): "control" | "empty" | "posts" | "blank" {
+  if (snapshot.hasSortControl) return "control";
+  if (EMPTY_FEED_COPY.test(snapshot.text)) return "empty";
+  if (snapshot.hasPost) return "posts";
+  return "blank";
+}
+
+async function readCompanyFeedSnapshot(page): Promise<CompanyFeedSnapshot> {
+  return page.evaluate(() => {
+    const text = (document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 100000);
+    const buttons = [...document.querySelectorAll('[role="button"]')];
+    const hasSortControl = buttons.some((el) =>
+      /^排序条件/.test((el.innerText || "").replace(/\s+/g, " ").trim()));
+    const hasPost = Boolean(document.querySelector(
+      'a[href*="urn:li:activity"], [data-urn*="urn:li:activity"], [componentkey*="update-card"], [componentkey*="feed-commentary"]',
+    ));
+    const hasHeader = [...document.querySelectorAll("[componentkey]")]
+      .some((el) => /(?:pages\.topCard\.|StickyTopCard\.)/.test(el.getAttribute("componentkey") || ""))
+      || Boolean(document.querySelector("h1"));
+    return { text, hasSortControl, hasPost, hasHeader };
+  }).catch(() => ({ text: "", hasSortControl: false, hasPost: false, hasHeader: false }));
+}
+
+const FEED_STATE_POLL_MS = 500;
+
+// 等页面自己给出结论。中途滚一下，避免 feed 因为没滚动而一直不渲染。
+async function waitForCompanyFeed(page, timeoutMs) {
+  const startedAt = Date.now();
+  let snapshot = await readCompanyFeedSnapshot(page);
+  let state = classifyCompanyFeed(snapshot);
+  let nudged = false;
+  while (state === "blank" && Date.now() - startedAt < timeoutMs) {
+    if (!nudged && Date.now() - startedAt > timeoutMs / 2) {
+      nudged = true;
+      await page.mouse.move(400, 400).catch(() => {});
+      await page.mouse.wheel(0, 900).catch(() => {});
+    }
+    await page.waitForTimeout(FEED_STATE_POLL_MS);
+    snapshot = await readCompanyFeedSnapshot(page);
+    state = classifyCompanyFeed(snapshot);
+  }
+  return { state, snapshot };
+}
+
+// 抓取失败后的二次确认：打开公司页看看是不是“压根没有动态”。
+// 只有公司头已经渲染、并且完全没有 feed 迹象时才认定为空账号；确认不了就返回 null，交给原来的失败流程。
+async function confirmEmptyCompanyFeed(page, source) {
+  try {
+    await page.goto(source.link, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => null);
+    await page.waitForTimeout(3000);
+    assertCompanyPageAvailable(page);
+    const { state, snapshot } = await waitForCompanyFeed(page, 15000);
+    if (state !== "empty" && !(state === "blank" && snapshot.hasHeader)) return null;
+    console.log(`账号 ${source.account} 公司页没有动态，按 0 条记录。`);
+    return await collectEmptyAccountProfile(page, source);
+  } catch {
+    return null;
+  }
+}
+
 async function scrapeAccountViaHttp(page, source, organizationId, template, connection, args) {
   console.log(`正在抓取账号：${source.account} ${source.link}（organizationId=${organizationId}）`);
 
@@ -358,8 +491,7 @@ async function scrapeAccountViaHttp(page, source, organizationId, template, conn
     }
     // 公司没有任何动态时，接口返回 200 + 空内容：没有 activityId、没有 token，
     // 但响应里会带“还没有动态”这类空状态文案。两者同时成立才是确定的 0 条，不是失败。
-    const emptyFeed = /还没有动态|暂无企业快讯|No posts yet|No updates yet|No company updates/i.test(initialText);
-    if (initialActivityIds.length === 0 && emptyFeed) {
+    if (initialActivityIds.length === 0 && containsEmptyFeedCopy(initialText)) {
       console.log(`账号 ${source.account} 没有企业动态，按 0 条记录。`);
       return [];
     }
@@ -435,6 +567,7 @@ async function scrapeAccountViaHttp(page, source, organizationId, template, conn
 // 账号级抓取也可能因为慢/限流失败，重试几次再记为失败；不因为单个账号把整条任务带崩。
 async function scrapeAccountWithRetry(page, source, organizationId, template, connection, args) {
   let lastError = null;
+  let checkedEmpty = false;
   for (let attempt = 1; attempt <= ACCOUNT_SCRAPE_ATTEMPTS; attempt++) {
     try {
       const accountRow = await collectProfileFromHtml(page, source);
@@ -444,6 +577,13 @@ async function scrapeAccountWithRetry(page, source, organizationId, template, co
     } catch (error) {
       lastError = error;
       if (isInvalidCompanyLinkError(error) || isFatalAccountError(error)) throw error;
+      // 分页接口失败也可能只是“这家公司没有动态”（不是所有空账号都会返回空状态文案）。
+      // 只确认一次：打开公司页看 feed，确认是空就按 0 条，不当失败。
+      if (!checkedEmpty) {
+        checkedEmpty = true;
+        const emptyAccountRow = await confirmEmptyCompanyFeed(page, source);
+        if (emptyAccountRow) return { accountRow: emptyAccountRow, posts: [] };
+      }
       console.error(`账号 ${source.account} 抓取失败（第 ${attempt}/${ACCOUNT_SCRAPE_ATTEMPTS} 次）：${error.message}`);
       if (attempt < ACCOUNT_SCRAPE_ATTEMPTS) await sleep(RETRY_DELAY_MS);
     }
@@ -454,10 +594,37 @@ async function scrapeAccountWithRetry(page, source, organizationId, template, co
 // 把公司动态排序切到「最新/最近」。默认是“热门”（相关性抽样，只给一小撮），
 // 不切的话拿不到全量时间线。下拉里切“最新”的入口文案是“最近搜索”。
 // 注意：sdui 下拉要真实鼠标点击（DOM .click() 不会触发），这里用 Playwright 的 locator.click()。
-async function ensureSortRecent(page, waitTimeoutMs = 15000, onBeforeSelectRecent = null) {
-  const trigger = page.locator('[role="button"]').filter({ hasText: /^排序条件/ }).first();
-  if (!(await trigger.count().catch(() => 0))) {
-    throw new Error("未找到 LinkedIn 动态排序控件，无法确认排序状态。");
+async function ensureSortRecent(page, waitTimeoutMs = 15000, onResetRequests = null) {
+  let trigger = page.locator('[role="button"]').filter({ hasText: /^排序条件/ }).first();
+  for (let look = 1; look <= 2; look++) {
+    if (await trigger.count().catch(() => 0)) break;
+
+    // 没有排序控件不等于抓取失败：公司一条动态都没有时页面不渲染 feed，也就没有排序入口，
+    // 这时只会显示“还没有动态”。先等页面把结果渲染出来，再决定是不是空账号。
+    const { state, snapshot } = await waitForCompanyFeed(page, waitTimeoutMs);
+    if (state === "control") {
+      trigger = page.locator('[role="button"]').filter({ hasText: /^排序条件/ }).first();
+      break;
+    }
+    if (state === "empty") throw new EmptyCompanyFeedError();
+    if (state === "posts") {
+      throw new Error("未找到 LinkedIn 动态排序控件，无法确认排序状态。");
+    }
+    if (state === "blank" && snapshot.hasHeader) {
+      // 公司头已经渲染、整页没有任何 feed 迹象：大概率是没有动态，也可能只是 feed 还没渲染出来。
+      // 刷新一次再等一轮，仍然没有 feed 才按“没有动态”处理，避免把慢页面误记成 0 条。
+      if (look === 2) {
+        console.log("刷新后公司页仍然只有公司头、没有 feed，按“没有动态”处理。");
+        throw new EmptyCompanyFeedError();
+      }
+      console.log("公司页只渲染出公司头、没有 feed，刷新一次再确认。");
+      // 刷新前后的分页请求不能混：模板只认刷新之后发出的那一条。
+      onResetRequests?.();
+      await page.reload({ waitUntil: "domcontentloaded" }).catch(() => null);
+      await page.waitForTimeout(3000);
+      continue;
+    }
+    throw new Error("LinkedIn 公司页没有渲染出来（没有动态也没有排序控件），无法确认排序状态。");
   }
   const label = (await trigger.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
   if (/最新|最近/.test(label)) {
@@ -479,7 +646,7 @@ async function ensureSortRecent(page, waitTimeoutMs = 15000, onBeforeSelectRecen
       continue;
     }
 
-    onBeforeSelectRecent?.();
+    onResetRequests?.();
     await recent.click();
 
     await page.waitForFunction(() => {
@@ -507,6 +674,8 @@ async function ensureSortRecent(page, waitTimeoutMs = 15000, onBeforeSelectRecen
 export function createLinkedInScraper(): PlatformScraper {
   let template: any = null;
   let templateAccount: string | null = null;
+  // prepare 阶段已经确认“没有动态”的公司：抓取时直接记 0 条，不打开公司页、不走分页接口。
+  const emptyAccounts = new Set<string>();
 
   return {
     code: "linkedin",
@@ -518,14 +687,26 @@ export function createLinkedInScraper(): PlatformScraper {
         .map((account) => ({ ...account, link: normalizeCompanyPostsUrl(account.link) }))
         .filter((account) => /\/company\//i.test(account.link));
       if (!companies.length) throw new Error("LinkedIn 账号列表里没有公司主页（/company/）");
-      console.log(`LinkedIn 模板页：${companies[0].link}`);
-      template = await captureTemplate(ctx.page, companies[0]);
-      templateAccount = companies[0].account;
-      console.log(`LinkedIn 模板已就绪：organizationId=${template.organizationId}`);
+
+      // 模板页必须是“有动态”的公司：排序控件和首屏分页请求只在有 feed 的页面上才有。
+      // 没有动态的公司页不是错误，先跳过，让它的账号流程按 0 条记录。
+      for (const company of companies) {
+        const captured = await captureTemplate(ctx.page, company);
+        if (captured.kind === "empty") {
+          emptyAccounts.add(company.account);
+          console.log(`模板页 ${company.account} 没有动态，换下一家公司页做模板。`);
+          continue;
+        }
+        template = captured;
+        templateAccount = company.account;
+        console.log(`LinkedIn 模板已就绪：organizationId=${template.organizationId}`);
+        return;
+      }
+
+      console.log(`LinkedIn 候选公司页都没有动态（${emptyAccounts.size} 个），本次不需要分页模板。`);
     },
 
     async scrapeAccount(ctx: AccountContext): Promise<AccountScrapeResult> {
-      if (!template) throw new Error("LinkedIn 模板未初始化");
       const source = { ...ctx.account, link: normalizeCompanyPostsUrl(ctx.account.link) };
       if (!/\/company\//i.test(source.link)) {
         // 个人主页不是公司 RSC 抓取的目标；但如果它本身是无效链接，
@@ -534,6 +715,14 @@ export function createLinkedInScraper(): PlatformScraper {
         assertCompanyPageAvailable(ctx.page);
         throw new Error(`非公司主页（/company/），RSC 公司动态抓取不支持：${source.link}`);
       }
+
+      // 公司在模板阶段已经确认没有动态：这是 0 条，不是失败，也不该因为没有分页模板报错。
+      if (emptyAccounts.has(source.account)) {
+        console.log(`账号 ${source.account} 没有企业动态，按 0 条记录。`);
+        return { accountRow: await collectEmptyAccountProfile(ctx.page, source), contentRows: [] };
+      }
+
+      if (!template) throw new Error("LinkedIn 模板未初始化");
 
       const args: LinkedInArgs = {
         sinceTime: ctx.sinceTsMs,
