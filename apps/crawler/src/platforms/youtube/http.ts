@@ -593,10 +593,14 @@ function findPrimaryInfo(next: any): any {
   return null;
 }
 
-/** 视频描述面板头部的发布日期（新版观看页的绝对日期也在这里出现一份）。 */
+/**
+ * 视频描述面板头部的发布日期。
+ * 只扫 engagementPanels（描述面板所在位置），不扫整个响应：
+ * 推荐位/结束屏里也有日期，但那是别的视频的，不能拿来做兜底。
+ */
 function findDescriptionPublishDate(next: any): string {
   let value = "";
-  walk(next, (node: any) => {
+  walk(next?.engagementPanels, (node: any) => {
     if (value) return;
     const text = textOf(node?.videoDescriptionHeaderRenderer?.publishDate);
     if (text) value = text;
