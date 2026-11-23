@@ -5,7 +5,7 @@
 // 请求在页面里用 fetch 发出，沿用浏览器的代理、cookie 和登录态。
 // 任何引导/传输级失败都会抛出 YouTubeHttpError，由上层决定是否降级回纯页面抓取。
 import { gotoWithRetry, pageFetch } from "../../core/page-http.ts";
-import { approxRelativePublishedRange, parseLocalizedNumber, parseYouTubeDateText } from "./parse.ts";
+import { approxRelativePublishedRange, normalizeExactPublishDate, parseLocalizedNumber, parseYouTubeDateText } from "./parse.ts";
 import { autoAcceptYouTubeConsent } from "./page.ts";
 
 export class YouTubeHttpError extends Error {
@@ -62,11 +62,17 @@ export type YouTubeHttpVideoDetail = {
   viewCountText: string;
   likeText: string;
   commentText: string;
-  /** 页面显示日期（next.dateText），唯一发布时间来源。 */
+  /** 发布时间（dateText 优先，缺失时按描述面板 / player microformat 兜底）。 */
   publishDate: string;
-  /** 只用于诊断：player 里那两个时间字段的原始值。 */
+  /** 只用于诊断：参与取值的日期字段原始值。 */
   uploadDate: string;
-  publishDateRaw?: { publishDate: string; uploadDate: string; dateText: string };
+  publishDateRaw?: {
+    dateText: string;
+    descriptionPublishDate: string;
+    publishDate: string;
+    uploadDate: string;
+    pickedFrom: string;
+  };
   description: string;
   isLive: boolean | null;
 };
@@ -571,7 +577,31 @@ export async function collectYouTubeList(
 function findPrimaryInfo(next: any): any {
   const contents = next?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
   if (!Array.isArray(contents)) return null;
-  return contents.find((node: any) => node?.videoPrimaryInfoRenderer)?.videoPrimaryInfoRenderer || null;
+  const direct = contents.find((node: any) => node?.videoPrimaryInfoRenderer)?.videoPrimaryInfoRenderer;
+  if (direct) return direct;
+
+  // 新观看页把主信息收进了 compositeVideoPrimaryInfoRenderer.compositeSourceVideoPrimaryInfoRenderers，
+  // 顶层的 videoPrimaryInfoRenderer 有时直接不存在，再往下找一层。
+  let nested: any = null;
+  for (const node of contents) {
+    if (!node?.compositeVideoPrimaryInfoRenderer) continue;
+    walk(node.compositeVideoPrimaryInfoRenderer, (candidate: any) => {
+      if (!nested && candidate?.videoPrimaryInfoRenderer) nested = candidate.videoPrimaryInfoRenderer;
+    });
+    if (nested) return nested;
+  }
+  return null;
+}
+
+/** 视频描述面板头部的发布日期（新版观看页的绝对日期也在这里出现一份）。 */
+function findDescriptionPublishDate(next: any): string {
+  let value = "";
+  walk(next, (node: any) => {
+    if (value) return;
+    const text = textOf(node?.videoDescriptionHeaderRenderer?.publishDate);
+    if (text) value = text;
+  });
+  return value;
 }
 
 function findSecondaryInfo(next: any): any {
@@ -648,10 +678,13 @@ function detectCommentsDisabled(next: any): string {
 /**
  * 从 player/next 响应里取视频指标。
  *
- * 发布时间只认 next 里 videoPrimaryInfoRenderer.dateText（就是页面上显示的 "2026/11/19"）：
- * player.microformat.publishDate 在生产登录态下是间歇性缺失的（拿不到时整轮都得靠
- * "1d ago" 反向倒推），不能作为唯一依据。dateText 拿不到就留空，由上层直接报错。
- * 指标仍然允许多来源互补（player 缺了用 next）。
+ * 发布时间按"精确度 + 稳定性"依次取（绝不拿 "13d ago" 这类相对时间反推）：
+ *   1. next.videoPrimaryInfoRenderer.dateText —— 页面上显示的日期，主来源；
+ *   2. next 里视频描述面板的 videoDescriptionHeaderRenderer.publishDate；
+ *   3. player.microformat.publishDate / uploadDate（ISO，带时区）。
+ * 单个字段都会在实验/登录态下间歇性缺失（线上见过 dateText 空、microformat 空），
+ * 所以必须多来源互补；全空才留空，交给上层 assertPublishTime 报错。
+ * 指标同样允许多来源互补（player 缺了用 next）。
  */
 export function parseYouTubeVideoDetail(player: any, next: any, videoId: string): YouTubeHttpVideoDetail {
   const details = player?.videoDetails || {};
@@ -662,10 +695,26 @@ export function parseYouTubeVideoDetail(player: any, next: any, videoId: string)
   const localizedViews = parseLocalizedNumber(viewCountText);
 
   const pageDateText = textOf(primary?.dateText);
-  const microDateRaw = {
-    publishDate: String(micro.publishDate || ""),
-    uploadDate: String(micro.uploadDate || ""),
+  const descriptionDateText = findDescriptionPublishDate(next);
+  const microPublishDate = String(micro.publishDate || "");
+  const microUploadDate = String(micro.uploadDate || "");
+  const dateCandidates = [
+    { from: "videoPrimaryInfoRenderer.dateText", text: pageDateText },
+    { from: "videoDescriptionHeaderRenderer.publishDate", text: descriptionDateText },
+    { from: "player.microformat.publishDate", text: microPublishDate },
+    { from: "player.microformat.uploadDate", text: microUploadDate },
+  ];
+  const picked = dateCandidates.find((candidate) => normalizeExactPublishDate(candidate.text)) || null;
+  if (!parseYouTubeDateText(pageDateText) && picked) {
+    // dateText 是主来源，缺了说明又命中了一次实验版式，记一条日志方便观察频率。
+    console.warn(`[YouTube] ${videoId} dateText 缺失，发布时间改用 ${picked.from}`);
+  }
+  const publishDateRaw = {
     dateText: pageDateText,
+    descriptionPublishDate: descriptionDateText,
+    publishDate: microPublishDate,
+    uploadDate: microUploadDate,
+    pickedFrom: picked?.from || "",
   };
 
   const microLike = micro?.likeCount;
@@ -687,9 +736,9 @@ export function parseYouTubeVideoDetail(player: any, next: any, videoId: string)
     viewCountText,
     likeText,
     commentText: "",
-    publishDate: parseYouTubeDateText(pageDateText),
+    publishDate: picked ? normalizeExactPublishDate(picked.text) : "",
     uploadDate: "",
-    publishDateRaw: microDateRaw,
+    publishDateRaw,
     description: textOf(micro.description) || textOf(secondary?.attributedDescription),
     isLive: details.isLiveContent ?? null,
   };

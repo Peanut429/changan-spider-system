@@ -314,6 +314,7 @@ export function normalizeYouTubeShortResult(result, account, scrapedAt) {
     url: result.url,
     publishTime: result.publishDate || result.uploadDate || "",
     publishTimeRaw: result.uploadDate || result.publishDate || result.relativePublishedText || "",
+    publishDateRaw: result.publishDateRaw || null,
     exposureText: "",
     readText: "",
     playText: result.viewCount || result.viewCountText || result.listViewText || "",

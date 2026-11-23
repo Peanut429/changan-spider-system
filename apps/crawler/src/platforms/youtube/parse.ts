@@ -60,6 +60,19 @@ export function parseYouTubeDateText(text) {
   return "";
 }
 
+/**
+ * 把精确日期字段统一成可入库的字符串：
+ * - 带时间的 ISO 原样保留（不换算时区，避免丢精度、避免跨日）；
+ * - 页面上的 "2026年11月9日" / "2026/11/9" / "Nov 9, 2026" 转成 YYYY-MM-DD；
+ * - "13d ago" 这类相对时间一律不认，返回空串。
+ */
+export function normalizeExactPublishDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return text;
+  return parseYouTubeDateText(text);
+}
+
 export function extractListRelativePublished(listText) {
   const lines = String(listText || "").split("\n").map((s) => s.trim()).filter(Boolean);
   return lines.find((s) => /前$|ago$/i.test(s)) || "";

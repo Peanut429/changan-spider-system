@@ -3,6 +3,7 @@ import {
   approxRelativePublishedRange,
   extractExactViewCount,
   extractListRelativePublished,
+  normalizeExactPublishDate,
   normalizeExactViewCount,
   parseLocalizedNumber,
   parseYouTubeDateText,
@@ -386,11 +387,28 @@ async function readInitialMetrics(page) {
 
     const pr = extractJsonFromScripts("ytInitialPlayerResponse");
     const idata = extractJsonFromScripts("ytInitialData");
-    const primary = idata?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find((x) => x.videoPrimaryInfoRenderer)?.videoPrimaryInfoRenderer;
+    function findPrimaryInfo(root) {
+      const contents = root?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+      if (!Array.isArray(contents)) return null;
+      const direct = contents.find((x) => x?.videoPrimaryInfoRenderer)?.videoPrimaryInfoRenderer;
+      if (direct) return direct;
+      for (const node of contents) {
+        const composite = node?.compositeVideoPrimaryInfoRenderer;
+        if (!composite) continue;
+        const nested = walkFind(composite, (o) => Boolean(o.videoPrimaryInfoRenderer), 1)[0]?.value?.videoPrimaryInfoRenderer;
+        if (nested) return nested;
+      }
+      return null;
+    }
+    const primary = findPrimaryInfo(idata);
     const likeCandidates = walkFind(primary || idata, (o) => o.iconName === "LIKE" && o.title != null);
     const defaultLike = likeCandidates.find((x) => x.path.includes("defaultButtonViewModel")) || likeCandidates[0] || null;
     const micro = idata?.microformat?.microformatDataRenderer || {};
     const owner = idata?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find((x) => x.videoSecondaryInfoRenderer)?.videoSecondaryInfoRenderer?.owner?.videoOwnerRenderer;
+    // 新版观看页的绝对日期会出现在描述面板头部；页面 meta 里也有一份，作为 JSON-LD 缺失时的兜底。
+    const descriptionPublishDate = walkFind(idata?.engagementPanels, (o) => Boolean(o.videoDescriptionHeaderRenderer?.publishDate), 1)[0]
+      ?.value?.videoDescriptionHeaderRenderer?.publishDate;
+    const metaPublishDate = document.querySelector('meta[itemprop="datePublished"], meta[itemprop="uploadDate"]')?.getAttribute("content") || "";
 
     return {
       pageTitle: document.title.replace(/ - YouTube$/, ""),
@@ -406,6 +424,8 @@ async function readInitialMetrics(page) {
       likeAccessibilityText: defaultLike?.value?.accessibilityText || "",
       publishDate: micro.publishDate || "",
       uploadDate: micro.uploadDate || "",
+      primaryDateText: textOf(primary?.dateText) || "",
+      pagePublishDate: textOf(descriptionPublishDate) || metaPublishDate || "",
       isLiveContent: pr?.videoDetails?.isLiveContent ?? null,
       isPrivate: pr?.videoDetails?.isPrivate ?? null,
       allowRatings: pr?.videoDetails?.allowRatings ?? null,
@@ -511,6 +531,24 @@ async function scrapeOneVideo(page, meta, commentTimeoutMs) {
     delete top.jsonLdUploadDate;
     const jsonLdDescription = top.jsonLdDescription || "";
     delete top.jsonLdDescription;
+    // JSON-LD 偶尔没有（登录态/实验）；描述面板和 meta 里的日期才是兜底。
+    const primaryDateText = String(top.primaryDateText || "");
+    delete top.primaryDateText;
+    const descriptionPublishDate = String(top.pagePublishDate || "");
+    delete top.pagePublishDate;
+    const microPublishDate = String(top.publishDate || "");
+    if (!top.publishDate) top.publishDate = normalizeExactPublishDate(primaryDateText) || normalizeExactPublishDate(descriptionPublishDate);
+    top.publishDateRaw = {
+      dateText: primaryDateText,
+      descriptionPublishDate,
+      publishDate: microPublishDate,
+      uploadDate: String(top.uploadDate || ""),
+      pickedFrom: jsonLdUploadDate ? "jsonLd.uploadDate"
+        : microPublishDate ? "player.microformat.publishDate"
+        : normalizeExactPublishDate(primaryDateText) ? "videoPrimaryInfoRenderer.dateText"
+        : top.publishDate ? "videoDescriptionHeaderRenderer.publishDate"
+        : "",
+    };
     let hoverInfo = { hoverMetadataText: "", hoverViewCount: "", hoverPublishDate: "", watchInfoText: "" };
     if (jsonLdUploadDate) {
       console.log(`[JSON-LD] ${meta.index}/${meta.listTitle || ""} 发布时间=${jsonLdUploadDate}`);
@@ -540,6 +578,8 @@ function normalizeYouTubeResult(result, account, scrapedAt) {
     url: result.url,
     publishTime,
     publishTimeRaw: result.publishDate || result.uploadDate || result.hoverMetadataText || result.listRelativePublished || "",
+    // 各来源的日期原值，报错时一并进日志，能直接看出上游哪个字段没了。
+    publishDateRaw: result.publishDateRaw || null,
     exposureText: "",
     readText: "",
     playText: exactViewCount || result.viewCountText || result.shortViewCountText || result.listViewText || "",

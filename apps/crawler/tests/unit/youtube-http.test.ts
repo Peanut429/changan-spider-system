@@ -7,6 +7,7 @@ import {
   parseYouTubeVideoDetail,
   textOf,
 } from "../../src/platforms/youtube/http.ts";
+import { normalizeExactPublishDate } from "../../src/platforms/youtube/parse.ts";
 
 test("parseYouTubeListContent handles lockup, videoRenderer and shorts lockups", () => {
   const content = {
@@ -298,9 +299,9 @@ test("textOf reads content, simpleText, text and runs", () => {
   assert.equal(textOf(null), "");
 });
 
-test("发布时间只用 next.dateText 这一处：player 有精确时间也不参与", () => {
+test("发布时间优先用 next.dateText，缺失时用 player microformat 兜底", () => {
   const player = {
-    videoDetails: { title: "Shorts 标题", viewCount: "4341" },
+    videoDetails: { title: "视频标题", viewCount: "4341" },
     microformat: { playerMicroformatRenderer: { publishDate: "2026-11-16T09:01:49-08:00", uploadDate: "2026-11-16T09:01:49-08:00" } },
   };
   const withDateText = {
@@ -314,20 +315,97 @@ test("发布时间只用 next.dateText 这一处：player 有精确时间也不�
       },
     },
   };
-  assert.equal(parseYouTubeVideoDetail(player, withDateText, "htk-6sQn5eM").publishDate, "2026-11-16");
-  assert.equal(parseYouTubeVideoDetail(player, withDateText, "htk-6sQn5eM").uploadDate, "");
+  const detail = parseYouTubeVideoDetail(player, withDateText, "htk-6sQn5eM");
+  assert.equal(detail.publishDate, "2026-11-16");
+  assert.equal(detail.uploadDate, "");
+  assert.equal(detail.publishDateRaw?.pickedFrom, "videoPrimaryInfoRenderer.dateText");
 
-  // dateText 缺失：即使 player 里两个字段都在，也不拿它们顶上
+  // 线上 BYDUAE/U30TpNZuNGQ：下一次响应里 dateText 缺失，但 player microformat 还在。
+  // 这是精确时间，不能像以前那样丢掉后直接报错。
   const withoutDateText = {
     contents: { twoColumnWatchNextResults: { results: { results: { contents: [{ videoPrimaryInfoRenderer: {} }] } } } },
   };
-  const detail = parseYouTubeVideoDetail(player, withoutDateText, "htk-6sQn5eM");
-  assert.equal(detail.publishDate, "", "dateText 缺失就该留空交给上层报错");
-  assert.deepEqual(detail.publishDateRaw, {
-    publishDate: "2026-11-16T09:01:49-08:00",
-    uploadDate: "2026-11-16T09:01:49-08:00",
-    dateText: "",
-  }, "原始值只用于诊断，不参与取值");
+  const fallback = parseYouTubeVideoDetail(player, withoutDateText, "U30TpNZuNGQ");
+  assert.equal(fallback.publishDate, "2026-11-16T09:01:49-08:00", "dateText 缺失时退回 player microformat 的精确时间（原样保留，不换算时区）");
+  assert.equal(fallback.publishDateRaw?.pickedFrom, "player.microformat.publishDate");
+});
+
+test("dateText、player microformat 都缺时，用描述面板的 publishDate", () => {
+  const player = { videoDetails: { title: "视频标题" }, microformat: { playerMicroformatRenderer: {} } };
+  const next = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [{ videoPrimaryInfoRenderer: { relativeDateText: { simpleText: "2 周前" } } }],
+          },
+        },
+      },
+    },
+    engagementPanels: [{
+      engagementPanelSectionListRenderer: {
+        content: {
+          structuredDescriptionContentRenderer: {
+            items: [{ videoDescriptionHeaderRenderer: { publishDate: { simpleText: "2026年11月9日" } } }],
+          },
+        },
+      },
+    }],
+  };
+  const detail = parseYouTubeVideoDetail(player, next, "U30TpNZuNGQ");
+  assert.equal(detail.publishDate, "2026-11-09");
+  assert.equal(detail.publishDateRaw?.pickedFrom, "videoDescriptionHeaderRenderer.publishDate");
+  assert.equal(detail.publishDateRaw?.dateText, "", "相对时间（2 周前）不参与取值");
+});
+
+test("新版 compositeVideoPrimaryInfoRenderer 里的主信息也能取到日期", () => {
+  const next = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [
+              { videoSecondaryInfoRenderer: {} },
+              {
+                compositeVideoPrimaryInfoRenderer: {
+                  compositeSourceVideoPrimaryInfoRenderers: [{
+                    videoPrimaryInfoRenderer: {
+                      title: { runs: [{ text: "视频标题" }] },
+                      dateText: { simpleText: "2026年11月9日" },
+                      viewCount: { videoViewCountRenderer: { viewCount: { simpleText: "47次观看" } } },
+                    },
+                  }],
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+  const detail = parseYouTubeVideoDetail({ videoDetails: { title: "视频标题" } }, next, "U30TpNZuNGQ");
+  assert.equal(detail.publishDate, "2026-11-09");
+  assert.equal(detail.viewCountText, "47次观看");
+});
+
+test("所有精确日期来源都缺失时才留空，交给上层报错", () => {
+  const detail = parseYouTubeVideoDetail(
+    { videoDetails: { title: "视频标题" }, microformat: { playerMicroformatRenderer: {} } },
+    { contents: { twoColumnWatchNextResults: { results: { results: { contents: [{ videoPrimaryInfoRenderer: { relativeDateText: { simpleText: "13d ago" } } }] } } } } },
+    "U30TpNZuNGQ",
+  );
+  assert.equal(detail.publishDate, "");
+  assert.equal(detail.publishDateRaw?.pickedFrom, "");
+});
+
+test("normalizeExactPublishDate 保留 ISO 时间、转换页面日期、拒绝相对时间", () => {
+  assert.equal(normalizeExactPublishDate("2026-11-16T09:01:49-08:00"), "2026-11-16T09:01:49-08:00");
+  assert.equal(normalizeExactPublishDate("2026-11-09"), "2026-11-09");
+  assert.equal(normalizeExactPublishDate("2026年11月9日"), "2026-11-09");
+  assert.equal(normalizeExactPublishDate("2026/11/09"), "2026-11-09");
+  assert.equal(normalizeExactPublishDate("13d ago"), "");
+  assert.equal(normalizeExactPublishDate("2 周前"), "");
+  assert.equal(normalizeExactPublishDate(""), "");
 });
 
 test("assertPublishTime 对取不到发布时间的内容直接报错（不再静默跳过）", async () => {
